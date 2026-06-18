@@ -1,7 +1,23 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { clinicConfig } from "./clinicConfig";
+
+// Inlined clinic configuration to ensure single-file self-containment and fix import resolution errors
+const clinicConfig = {
+  clinicName: "Smart Clinic & Diagnostics",
+  tagline: "Your Health, Our Top Priority",
+  currency: "PKR", 
+  doctor: {
+    name: "Dr. Mohsin Shahzad",
+    degree: "MBBS, FCPS (Medicine)",
+    specialty: "Consultant Physician & Specialist",
+    consultationFee: 500,
+  },
+  contact: {
+    phone: "+92 300 1234567",
+    address: "Main Multan Road, Near General Hospital, Pakistan",
+  }
+};
 
 interface Patient {
   pid: string;
@@ -9,104 +25,141 @@ interface Patient {
   age: string;
   gender: string;
   phone: string;
-  vitals: { bp: string; temp: string; weight: string };
 }
 
-interface QueueItem extends Patient {
+interface Visit {
+  id: string;
+  pid: string;
+  date: string;
+  time: string;
+  complaints: string;
+  diagnosis: string;
+  medicines: string;
+  vitals: { bp: string; temp: string; weight: string };
   tokenNumber: number;
+}
+
+interface Token {
+  tokenNumber: number;
+  pid: string;
+  name: string;
+  age: string;
+  gender: string;
+  phone: string;
+  vitals: { bp: string; temp: string; weight: string };
   time: string;
 }
 
 export default function PatientForm() {
+  const [mounted, setMounted] = useState(false);
+
+  // Core Persistent States
+  const [patientsList, setPatientsList] = useState<Patient[]>([]);
+  const [visitsHistory, setVisitsHistory] = useState<Visit[]>([]);
+  const [tokenList, setTokenList] = useState<Token[]>([]);
+  const [tokenCounter, setTokenCounter] = useState(1);
+
+  // Form Inputs
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
   const [gender, setGender] = useState("Male");
   const [phone, setPhone] = useState("");
   const [vitals, setVitals] = useState({ bp: "", temp: "", weight: "" });
   
-  // لائیو کیو اور کاؤنٹرز کی سٹیٹ
-  const [tokenList, setTokenList] = useState<QueueItem[]>([]);
-  const [tokenCounter, setTokenCounter] = useState(1);
-  const [pidCounter, setPidCounter] = useState(1001);
-  const [patientsDb, setPatientsDb] = useState<Patient[]>([]); // مستقل مریضوں کا ڈیٹا بیس
-  
-  // سرچ اور سلیکشن کی سٹیٹ
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<Patient[]>([]);
-  const [selectedReturning, setSelectedReturning] = useState<Patient | null>(null);
+  // Track if we are registering an existing patient
+  const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
 
-  const [selectedPatient, setSelectedPatient] = useState<QueueItem | null>(null);
+  // Search Returning Patient
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearchResults, setShowSearchResults] = useState(false);
+
+  // Active Doctor Desk States
+  const [selectedToken, setSelectedToken] = useState<Token | null>(null);
   const [prescription, setPrescription] = useState({ complaints: "", Diagnosis: "", medicines: "" });
 
-  // 💾 لوکل اسٹوریج سے ڈیٹا لوڈ کرنے کا اثر (Next.js Hydration Safe)
+  // Custom Alerts
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+
   useEffect(() => {
-    const savedQueue = localStorage.getItem("smart_clinic_active_queue");
-    if (savedQueue) setTokenList(JSON.parse(savedQueue));
+    setMounted(true);
+    const storedPatients = localStorage.getItem("sc_patients");
+    const storedVisits = localStorage.getItem("sc_visits");
+    const storedTokens = localStorage.getItem("sc_tokens");
+    const storedCounter = localStorage.getItem("sc_token_counter");
 
-    const savedTokenCounter = localStorage.getItem("smart_clinic_token_counter");
-    if (savedTokenCounter) setTokenCounter(parseInt(savedTokenCounter));
-
-    const savedPidCounter = localStorage.getItem("smart_clinic_pid_counter");
-    if (savedPidCounter) setPidCounter(parseInt(savedPidCounter));
-
-    const savedPatientsDb = localStorage.getItem("smart_clinic_patients_db");
-    if (savedPatientsDb) setPatientsDb(JSON.parse(savedPatientsDb));
+    if (storedPatients) setPatientsList(JSON.parse(storedPatients));
+    if (storedVisits) setVisitsHistory(JSON.parse(storedVisits));
+    if (storedTokens) setTokenList(JSON.parse(storedTokens));
+    if (storedCounter) setTokenCounter(parseInt(storedCounter, 10));
   }, []);
 
-  // 🔍 واپس آنے والے مریض کو تلاش کرنے کا فنکشن
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    const filtered = patientsDb.filter(p => 
-      p.name.toLowerCase().includes(query.toLowerCase()) ||
-      p.phone.includes(query) ||
-      p.pid.toLowerCase().includes(query.toLowerCase())
-    );
-    setSearchResults(filtered);
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_patients", JSON.stringify(patientsList));
+  }, [patientsList, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_visits", JSON.stringify(visitsHistory));
+  }, [visitsHistory, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_tokens", JSON.stringify(tokenList));
+  }, [tokenList, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_token_counter", tokenCounter.toString());
+  }, [tokenCounter, mounted]);
+
+  if (!mounted) return <div className="text-center py-12 text-slate-500">Loading Smart Patient System...</div>;
+
+  // Helper to trigger custom alerts
+  const triggerAlert = (msg: string) => {
+    setAlertMessage(msg);
+    setTimeout(() => setAlertMessage(null), 4000);
   };
 
-  // پرانے مریض کو سلیکٹ کر کے فارم آٹو فل کرنا
-  const selectReturningPatient = (patient: Patient) => {
-    setSelectedReturning(patient);
+  const filteredPatients = searchQuery.trim() === "" 
+    ? [] 
+    : patientsList.filter(p => 
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.pid.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.phone.includes(searchQuery)
+      );
+
+  const handleSelectReturning = (patient: Patient) => {
     setName(patient.name);
     setAge(patient.age);
     setGender(patient.gender);
     setPhone(patient.phone);
-    setSearchResults([]);
+    setSelectedExistingPid(patient.pid);
     setSearchQuery("");
+    setShowSearchResults(false);
+    triggerAlert(`Existing Patient Selected: ${patient.name} (${patient.pid})`);
   };
 
-  // فارم کو دوبارہ خالی (Reset) کرنا
-  const handleClearForm = () => {
-    setSelectedReturning(null);
-    setName("");
-    setAge("");
-    setGender("Male");
-    setPhone("");
-    setVitals({ bp: "", temp: "", weight: "" });
-  };
-
-  // 📝 نیا ٹوکن اور رجسٹریشن سبمٹ کرنا
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !age) return alert("Please enter Patient Name and Age");
+    if (!name || !age) return triggerAlert("⚠️ Please enter Patient Name and Age!");
 
-    let finalPid = "";
-    let isNewPatient = false;
+    let finalPid = selectedExistingPid;
 
-    if (selectedReturning) {
-      // اگر پرانا مریض ہے تو وہی پرانا PID استعمال کریں گے
-      finalPid = selectedReturning.pid;
-    } else {
-      // اگر بالکل نیا مریض ہے تو نیا PID جنریٹ ہوگا
-      finalPid = `PID-${pidCounter}`;
-      isNewPatient = true;
+    if (!finalPid) {
+      const generatedNumber = 1001 + patientsList.length;
+      finalPid = `PID-${generatedNumber}`;
+      const newPatientRecord: Patient = {
+        pid: finalPid,
+        name,
+        age,
+        gender,
+        phone
+      };
+      setPatientsList(prev => [newPatientRecord, ...prev]);
     }
 
-    const newToken: QueueItem = {
+    const newToken: Token = {
       tokenNumber: tokenCounter,
       pid: finalPid,
       name,
@@ -117,56 +170,55 @@ export default function PatientForm() {
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    // 1. ایکٹو کیو اپڈیٹ کریں
-    const updatedQueue = [newToken, ...tokenList];
-    setTokenList(updatedQueue);
-    localStorage.setItem("smart_clinic_active_queue", JSON.stringify(updatedQueue));
+    setTokenList(prev => [newToken, ...prev]);
+    setTokenCounter(prev => prev + 1);
 
-    // 2. اگر نیا مریض تھا تو اسے اپنے لائف ٹائم ڈیٹا بیس میں سیو کریں
-    if (isNewPatient) {
-      const newPatientRecord: Patient = {
-        pid: finalPid,
-        name,
-        age,
-        gender,
-        phone,
-        vitals
-      };
-      const updatedDb = [newPatientRecord, ...patientsDb];
-      setPatientsDb(updatedDb);
-      localStorage.setItem("smart_clinic_patients_db", JSON.stringify(updatedDb));
-
-      // PID کاؤنٹر بڑھائیں
-      const nextPid = pidCounter + 1;
-      setPidCounter(nextPid);
-      localStorage.setItem("smart_clinic_pid_counter", nextPid.toString());
-    }
-
-    // 3. ٹوکن کاؤنٹر بڑھائیں
-    const nextToken = tokenCounter + 1;
-    setTokenCounter(nextToken);
-    localStorage.setItem("smart_clinic_token_counter", nextToken.toString());
-
-    // فارم ری سیٹ کریں
-    handleClearForm();
+    setName("");
+    setAge("");
+    setPhone("");
+    setVitals({ bp: "", temp: "", weight: "" });
+    setSelectedExistingPid(null);
+    triggerAlert(`🎟️ Token #${tokenCounter} Issued Successfully for PID: ${finalPid}`);
   };
 
-  const handleCheck = (patient: QueueItem) => {
-    setSelectedPatient(patient);
+  const handleCheck = (token: Token) => {
+    setSelectedToken(token);
     setPrescription({ complaints: "", Diagnosis: "", medicines: "" });
   };
 
-  // 🖨️ لائیو پرچی پرنٹ کرنے کا جادوئی فنکشن (With PID Support)
+  const handleCloneVisit = (pastVisit: Visit) => {
+    setPrescription({
+      complaints: pastVisit.complaints,
+      Diagnosis: pastVisit.diagnosis,
+      medicines: pastVisit.medicines
+    });
+    triggerAlert("📋 Past Prescription Copied to Current Desk!");
+  };
+
   const handlePrint = () => {
-    if (!selectedPatient) return;
+    if (!selectedToken) return;
+
+    const newVisitRecord: Visit = {
+      id: `VISIT-${Date.now()}`,
+      pid: selectedToken.pid,
+      date: new Date().toLocaleDateString('en-GB'),
+      time: selectedToken.time,
+      complaints: prescription.complaints || "Routine Checkup",
+      diagnosis: prescription.Diagnosis || "Under Observation",
+      medicines: prescription.medicines || "No medicines prescribed.",
+      vitals: selectedToken.vitals,
+      tokenNumber: selectedToken.tokenNumber
+    };
+
+    setVisitsHistory(prev => [newVisitRecord, ...prev]);
 
     const printWindow = window.open("", "_blank");
-    if (!printWindow) return alert("Please allow popups for this website to print prescriptions");
+    if (!printWindow) return triggerAlert("⚠️ Please allow popups for this website to print prescriptions");
 
     const prescriptionHTML = `
       <html>
         <head>
-          <title>Prescription - ${selectedPatient.name}</title>
+          <title>Prescription - ${selectedToken.name}</title>
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #334155; padding: 40px; line-height: 1.6; }
             .header { text-align: center; border-bottom: 3px double #2563eb; padding-bottom: 15px; margin-bottom: 30px; }
@@ -174,16 +226,16 @@ export default function PatientForm() {
             .clinic-tagline { font-size: 14px; color: #64748b; font-style: italic; margin: 5px 0 0 0; }
             .doctor-info { margin-top: 10px; font-size: 14px; color: #1e293b; }
             
-            .patient-bar { display: flex; justify-content: space-between; background: #f8fafc; padding: 12px 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 35px; font-size: 14px; flex-wrap: wrap; gap: 10px; }
+            .patient-bar { display: grid; grid-template-columns: 1fr 1fr 1fr; background: #f8fafc; padding: 12px 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 35px; font-size: 14px; gap: 10px; }
             .patient-bar strong { color: #0f172a; }
             
             .content-grid { display: grid; grid-template-columns: 1fr; gap: 25px; }
-            .section-title { font-size: 15px; font-weight: bold; text-transform: uppercase; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 10px; tracking-spacing: 1px; }
+            .section-title { font-size: 15px; font-weight: bold; text-transform: uppercase; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 10px; }
             
             .rx-symbol { font-size: 24px; font-weight: bold; color: #2563eb; font-family: 'Times New Roman', serif; margin-bottom: 10px; }
             .medicines-text { font-family: monospace; font-size: 15px; white-space: pre-wrap; padding-left: 10px; color: #0f172a; }
             
-            .footer { position: fixed; bottom: 30px; left: 40px; right: 40px; text-align: center; border-top: 1px solid #e2e8f0; pt: 10px; font-size: 12px; color: #94a3b8; }
+            .footer { position: fixed; bottom: 30px; left: 40px; right: 40px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 12px; color: #94a3b8; }
           </style>
         </head>
         <body>
@@ -197,21 +249,22 @@ export default function PatientForm() {
           </div>
 
           <div class="patient-bar">
-            <div><strong>PID:</strong> <span style="font-family: monospace; font-weight: bold; color: #2563eb;">${selectedPatient.pid}</span></div>
-            <div><strong>Patient:</strong> ${selectedPatient.name}</div>
-            <div><strong>Age/Gender:</strong> ${selectedPatient.age} Yrs / ${selectedPatient.gender}</div>
-            <div><strong>Token:</strong> #${selectedPatient.tokenNumber}</div>
-            <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
+            <div><strong>Patient ID:</strong> ${selectedToken.pid}</div>
+            <div><strong>Patient:</strong> ${selectedToken.name}</div>
+            <div><strong>Age/Gender:</strong> ${selectedToken.age} Yrs / ${selectedToken.gender}</div>
+            <div><strong>Phone:</strong> ${selectedToken.phone || "N/A"}</div>
+            <div><strong>Token:</strong> #${selectedToken.tokenNumber}</div>
+            <div><strong>Date/Time:</strong> ${new Date().toLocaleDateString('en-GB')} ${selectedToken.time}</div>
           </div>
 
           <div class="content-grid">
-            ${selectedPatient.vitals.bp || selectedPatient.vitals.temp || selectedPatient.vitals.weight ? `
+            ${selectedToken.vitals.bp || selectedToken.vitals.temp || selectedToken.vitals.weight ? `
               <div>
                 <div class="section-title">Vitals / وائٹلز</div>
                 <div style="font-size: 13px; display: flex; gap: 20px;">
-                  ${selectedPatient.vitals.bp ? `<span><strong>BP:</strong> ${selectedPatient.vitals.bp}</span>` : ""}
-                  ${selectedPatient.vitals.temp ? `<span><strong>Temp:</strong> ${selectedPatient.vitals.temp}</span>` : ""}
-                  ${selectedPatient.vitals.weight ? `<span><strong>Weight:</strong> ${selectedPatient.vitals.weight}kg</span>` : ""}
+                  ${selectedToken.vitals.bp ? `<span><strong>BP:</strong> ${selectedToken.vitals.bp}</span>` : ""}
+                  ${selectedToken.vitals.temp ? `<span><strong>Temp:</strong> ${selectedToken.vitals.temp}</span>` : ""}
+                  ${selectedToken.vitals.weight ? `<span><strong>Weight:</strong> ${selectedToken.vitals.weight}kg</span>` : ""}
                 </div>
               </div>
             ` : ""}
@@ -250,64 +303,94 @@ export default function PatientForm() {
     printWindow.document.write(prescriptionHTML);
     printWindow.document.close();
 
-    // مریض کا چیک اپ مکمل ہونے پر کیو سے ہٹانا اور محفوظ کرنا
-    const updatedQueue = tokenList.filter(p => p.tokenNumber !== selectedPatient.tokenNumber);
-    setTokenList(updatedQueue);
-    localStorage.setItem("smart_clinic_active_queue", JSON.stringify(updatedQueue));
-    setSelectedPatient(null);
+    setTokenList(prev => prev.filter(p => p.tokenNumber !== selectedToken.tokenNumber));
+    setSelectedToken(null);
+    setPrescription({ complaints: "", Diagnosis: "", medicines: "" });
   };
 
+  const currentPatientHistory = selectedToken 
+    ? visitsHistory.filter(v => v.pid === selectedToken.pid) 
+    : [];
+
   return (
-    <div className="space-y-8 mt-8">
+    <div className="space-y-8 mt-4">
+      {alertMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 border border-slate-700 animate-bounce">
+          <span>🔔</span>
+          <p className="text-xs font-bold">{alertMessage}</p>
+        </div>
+      )}
+
+      {/* Quick Search */}
+      <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
+        <h4 className="text-sm font-bold mb-1 flex items-center gap-1.5">
+          🔍 Search Returning Patient (پرانے مریض تلاش کریں)
+        </h4>
+        <p className="text-xs text-blue-100 mb-3">Type Name, Phone or Patient ID (PID) to quickly re-register without typing details.</p>
+        <div className="relative">
+          <input 
+            type="text" 
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowSearchResults(true);
+            }}
+            placeholder="e.g. Ali, 03001234567, PID-1002" 
+            className="w-full px-4 py-2.5 rounded-xl text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+          />
+          {showSearchResults && filteredPatients.length > 0 && (
+            <div className="absolute left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 max-h-52 overflow-y-auto z-10 text-slate-800">
+              {filteredPatients.map(p => (
+                <div 
+                  key={p.pid} 
+                  onClick={() => handleSelectReturning(p)}
+                  className="flex justify-between items-center px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 text-xs"
+                >
+                  <div>
+                    <span className="font-extrabold text-blue-600 block">{p.name} ({p.gender})</span>
+                    <span className="text-slate-400 font-medium">Age: {p.age} • Phone: {p.phone || "N/A"}</span>
+                  </div>
+                  <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-bold text-[10px]">
+                    {p.pid}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* 1. Patient Registration Form Card */}
+        {/* Patient Form Card */}
         <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-          <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-2">
+          <div className="flex justify-between items-center mb-4">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               📝 New Patient Entry
             </h3>
-            <span className="text-[10px] bg-blue-50 text-blue-600 font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-              {selectedReturning ? `Using: ${selectedReturning.pid}` : `Next: PID-${pidCounter}`}
-            </span>
-          </div>
-
-          {/* ریٹرننگ پیشنٹ کو فوری تلاش کرنے کا فریم */}
-          <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-dashed border-slate-200">
-            <label className="block text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">🔍 Quick Search Returning Patient</label>
-            <input
-              type="text"
-              placeholder="Search by PID (e.g. PID-1001) or Phone..."
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500"
-            />
-            {searchResults.length > 0 && (
-              <div className="mt-2 max-h-32 overflow-y-auto bg-white border border-slate-200 rounded-lg divide-y divide-slate-100 shadow-sm">
-                {searchResults.map((p) => (
-                  <button
-                    key={p.pid}
-                    type="button"
-                    onClick={() => selectReturningPatient(p)}
-                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50/50 flex justify-between items-center transition-colors"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-700">{p.name}</span>{" "}
-                      <span className="text-slate-400">({p.gender}, {p.age} Yrs)</span>
-                    </div>
-                    <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono font-bold text-[10px]">{p.pid}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {selectedReturning && (
-              <div className="mt-2 flex items-center justify-between bg-emerald-50 text-emerald-700 text-xs px-2.5 py-1.5 rounded-lg border border-emerald-100 font-semibold">
-                <span>🔄 Returning: {selectedReturning.name} ({selectedReturning.pid})</span>
-                <button type="button" onClick={handleClearForm} className="text-red-500 hover:text-red-700 font-bold ml-2">Clear ❌</button>
-              </div>
+            {selectedExistingPid && (
+              <button 
+                onClick={() => {
+                  setSelectedExistingPid(null);
+                  setName("");
+                  setAge("");
+                  setPhone("");
+                  setGender("Male");
+                }}
+                className="text-[10px] text-red-500 font-extrabold border border-red-200 px-2 py-0.5 rounded-md hover:bg-red-50"
+              >
+                Clear Auto-Fill
+              </button>
             )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {selectedExistingPid && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between">
+                <span>🔄 Registering Existing PID:</span>
+                <span className="bg-amber-100 px-1.5 py-0.5 rounded">{selectedExistingPid}</span>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Patient Name *</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Muhammad Ali" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
@@ -348,13 +431,15 @@ export default function PatientForm() {
           </form>
         </div>
 
-        {/* 2. Live Active Token Queue Card */}
+        {/* Live Active Token Queue Card */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               ⏳ Active OPD Queue ({tokenList.length})
             </h3>
-            <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-full">Today's Fee: {clinicConfig.doctor.consultationFee} PKR</span>
+            <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-full">
+              Today's Fee: {clinicConfig.doctor.consultationFee} PKR
+            </span>
           </div>
 
           {tokenList.length === 0 ? (
@@ -375,9 +460,11 @@ export default function PatientForm() {
                     <div>
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-bold text-slate-900">{token.name}</h4>
-                        <span className="bg-slate-200/70 text-slate-700 font-mono text-[9px] px-1.5 py-0.5 rounded font-bold">{token.pid}</span>
+                        <span className="bg-slate-200 text-slate-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded">
+                          {token.pid}
+                        </span>
                       </div>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      <p className="text-xs text-slate-500 font-medium">
                         {token.gender}, {token.age} Yrs • <span className="text-slate-400">{token.time}</span>
                       </p>
                     </div>
@@ -399,61 +486,120 @@ export default function PatientForm() {
         </div>
       </div>
 
-      {/* 3. Dynamic Doctor Prescription Checkup Desk */}
-      {selectedPatient && (
-        <div className="bg-white p-6 rounded-2xl border-2 border-blue-500 shadow-md transition-all">
-          <div className="flex justify-between items-center border-b border-slate-200 pb-4 mb-4">
+      {/* Doctor Prescription Checkup Desk with EHR Timeline */}
+      {selectedToken && (
+        <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all">
+          {/* Header */}
+          <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
             <div>
-              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md uppercase tracking-wider">
+              <span className="bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
                 Active Examination Desk
               </span>
-              <h3 className="text-xl font-black text-slate-900 mt-1">
-                Checking: {selectedPatient.name} ({selectedPatient.pid} / Token #{selectedPatient.tokenNumber})
+              <h3 className="text-lg font-black mt-1.5">
+                Checking: {selectedToken.name} (Token #{selectedToken.tokenNumber})
               </h3>
             </div>
-            <button onClick={() => setSelectedPatient(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600 border border-slate-200 px-3 py-1.5 rounded-xl">
+            <button onClick={() => setSelectedToken(null)} className="text-xs font-bold text-slate-400 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl transition-colors">
               ❌ Close Desk
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm space-y-2">
-              <h4 className="font-bold text-slate-800 border-b border-slate-200 pb-1 mb-2">📋 Patient Demographics</h4>
-              <p><strong className="text-slate-500">Patient PID:</strong> <span className="font-mono font-bold text-blue-600">{selectedPatient.pid}</span></p>
-              <p><strong className="text-slate-500">Gender/Age:</strong> {selectedPatient.gender}, {selectedPatient.age} Years</p>
-              <p><strong className="text-slate-500">Phone:</strong> {selectedPatient.phone || "N/A"}</p>
-              <p><strong className="text-slate-500">Check-in Time:</strong> {selectedPatient.time}</p>
-              <div className="mt-4 pt-2 border-t border-slate-200 space-y-1">
-                <p className="font-semibold text-slate-700">Initial Vitals:</p>
-                <p>❤️ BP: {selectedPatient.vitals.bp || "Not Checked"}</p>
-                <p>🌡️ Temp: {selectedPatient.vitals.temp || "Not Checked"}</p>
-                <p>⚖️ Weight: {selectedPatient.vitals.weight ? `${selectedPatient.vitals.weight} kg` : "Not Checked"}</p>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 division-x divide-slate-200">
+            
+            {/* LEFT SIDEBAR: Patient Demographics & EHR Medical History Timeline (4 Cols) */}
+            <div className="lg:col-span-4 bg-slate-50/60 p-6 border-r border-slate-200 flex flex-col h-[520px]">
+              {/* Demographics Summary */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
+                <h4 className="font-extrabold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex justify-between items-center">
+                  <span>📋 Patient Demographics</span>
+                  <span className="text-blue-600 font-black">{selectedToken.pid}</span>
+                </h4>
+                <p><strong className="text-slate-500">Gender/Age:</strong> {selectedToken.gender}, {selectedToken.age} Years</p>
+                <p><strong className="text-slate-500">Phone:</strong> {selectedToken.phone || "N/A"}</p>
+                <div className="pt-2 border-t border-slate-100 space-y-1 text-slate-600">
+                  <p className="font-semibold text-slate-700">Initial Vitals:</p>
+                  <p>❤️ BP: {selectedToken.vitals.bp || "Not Checked"}</p>
+                  <p>🌡️ Temp: {selectedToken.vitals.temp || "Not Checked"}</p>
+                  <p>⚖️ Weight: {selectedToken.vitals.weight ? `${selectedToken.vitals.weight} kg` : "Not Checked"}</p>
+                </div>
+              </div>
+
+              {/* EHR Medical History Timeline */}
+              <div className="flex-1 flex flex-col min-h-0">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>📜 Medical History Timeline</span>
+                  <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                    {currentPatientHistory.length} Previous Visits
+                  </span>
+                </h4>
+
+                {currentPatientHistory.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-xl bg-white p-6 text-center">
+                    <p className="text-lg">🆕</p>
+                    <p className="text-xs font-bold text-slate-400 mt-1">First Time Visit</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">No previous visits recorded for this patient yet.</p>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto pr-1 space-y-3 text-xs">
+                    {currentPatientHistory.map((visit) => (
+                      <div key={visit.id} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all relative">
+                        <div className="absolute left-[-11px] top-5 w-2 h-2 rounded-full bg-blue-500"></div>
+                        
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="bg-slate-100 text-slate-700 font-black px-2 py-0.5 rounded text-[10px]">
+                            📅 {visit.date}
+                          </span>
+                          <button 
+                            onClick={() => handleCloneVisit(visit)}
+                            className="text-[10px] font-extrabold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 hover:underline"
+                            title="Copy previous complaints, diagnosis & medicines to current prescription"
+                          >
+                            📋 Copy Rx (پرانی دوا کاپی کریں)
+                          </button>
+                        </div>
+
+                        <div className="space-y-1 text-[11px] text-slate-600">
+                          <p><strong className="text-slate-800">Complaints:</strong> {visit.complaints}</p>
+                          <p><strong className="text-slate-800">Diagnosis:</strong> {visit.diagnosis}</p>
+                          <p className="bg-slate-50 p-1.5 rounded text-slate-700 font-mono text-[10px] mt-1 whitespace-pre-wrap border-l-2 border-blue-400">
+                            {visit.medicines}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="md:col-span-2 space-y-4">
+            {/* RIGHT SIDE: Dynamic Treatment Form Area (8 Cols) */}
+            <div className="lg:col-span-8 p-6 space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Patient Complaints / Symptoms</label>
-                  <textarea rows={2} value={prescription.complaints} onChange={(e) => setPrescription({...prescription, complaints: e.target.value})} placeholder="e.g. Fever since 2 days, Cough, Body aches" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                  <textarea rows={3} value={prescription.complaints} onChange={(e) => setPrescription({...prescription, complaints: e.target.value})} placeholder="e.g. Fever since 2 days, Cough, Body aches" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Diagnosis</label>
-                  <textarea rows={2} value={prescription.Diagnosis} onChange={(e) => setPrescription({...prescription, Diagnosis: e.target.value})} placeholder="e.g. Acute Viral Infection" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                  <textarea rows={3} value={prescription.Diagnosis} onChange={(e) => setPrescription({...prescription, Diagnosis: e.target.value})} placeholder="e.g. Acute Viral Infection" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Rx - Treatment &amp; Medicines</label>
-                <textarea rows={3} value={prescription.medicines} onChange={(e) => setPrescription({...prescription, medicines: e.target.value})} placeholder="e.g. 1. Tab Paracetamol 500mg -- 1+1+1 (5 days)" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-blue-500" />
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs font-bold text-slate-600 uppercase">Rx - Treatment &amp; Medicines (نسخہ تجویز کریں)</label>
+                  <span className="text-[10px] text-slate-400 font-medium">Tips: Start each medicine in a new line</span>
+                </div>
+                <textarea rows={6} value={prescription.medicines} onChange={(e) => setPrescription({...prescription, medicines: e.target.value})} placeholder="e.g.&#10;1. Tab Paracetamol 500mg -- 1+1+1 (5 days)&#10;2. Syp Hydryll -- 2 tsp thrice daily" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-blue-500" />
               </div>
 
-              <div className="flex justify-end pt-2">
-                <button onClick={handlePrint} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-6 rounded-xl text-sm transition-colors shadow-md shadow-emerald-100">
+              <div className="flex justify-end pt-3 border-t border-slate-100">
+                <button onClick={handlePrint} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl text-sm transition-colors shadow-md shadow-emerald-100 flex items-center gap-2">
                   🖨️ Save Checkup &amp; Print Prescription
                 </button>
               </div>
             </div>
+
           </div>
         </div>
       )}
