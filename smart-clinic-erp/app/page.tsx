@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react";
 
-
-// Inlined Professional Clinic Configuration
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
@@ -20,7 +18,6 @@ const clinicConfig = {
   }
 };
 
-// Data Interfaces
 interface Patient {
   pid: string;
   name: string;
@@ -104,7 +101,12 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
-  // --- CORE DATA STATES (Persistent via LocalStorage) ---
+  // --- ROLE MANAGEMENT STATES ---
+  const [userRole, setUserRole] = useState<"doctor" | "receptionist" | null>(null);
+  const [pinInput, setPinInput] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // --- CORE DATA STATES ---
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   const [visitsHistory, setVisitsHistory] = useState<Visit[]>([]);
   const [tokenList, setTokenList] = useState<Token[]>([]);
@@ -129,7 +131,6 @@ export default function Home() {
   const [billingRecords, setBillingRecords] = useState<Invoice[]>([]);
 
   // --- FORM INPUT STATES ---
-  // Patient Reg Form
   const [patientName, setPatientName] = useState("");
   const [patientAge, setPatientAge] = useState("");
   const [patientGender, setPatientGender] = useState("Male");
@@ -171,8 +172,7 @@ export default function Home() {
   const [billingLabTotal, setBillingLabTotal] = useState("");
   const [billingDiscount, setBillingDiscount] = useState("0");
 
-  
-  // Load data on Mount
+  // Load persistence configurations on Mount
   useEffect(() => {
     setMounted(true);
     setExpenseDate(new Date().toISOString().split("T")[0]);
@@ -196,9 +196,14 @@ export default function Home() {
     
     const storedManualRev = localStorage.getItem("sc_manual_rev");
     if (storedManualRev) setManualRevenue(Number(storedManualRev));
+
+    const activeSessionRole = localStorage.getItem("sc_active_role");
+    if (activeSessionRole === "doctor" || activeSessionRole === "receptionist") {
+      setUserRole(activeSessionRole);
+    }
   }, []);
 
-  // Save data to LocalStorage when states change
+  // Sync state transitions to browser LocalStorage
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem("sc_patients", JSON.stringify(patientsList));
@@ -255,12 +260,36 @@ export default function Home() {
     );
   }
 
-  // Notification Helper
   const triggerAlert = (msg: string) => {
     setAlertMessage(msg);
     setTimeout(() => setAlertMessage(null), 3500);
   };
 
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+
+    if (pinInput === "4142") {
+      setUserRole("doctor");
+      localStorage.setItem("sc_active_role", "doctor");
+      triggerAlert("🔓 Welcome Doctor Mohsin Shahzad!");
+    } else if (pinInput === "1122") {
+      setUserRole("receptionist");
+      localStorage.setItem("sc_active_role", "receptionist");
+      setActiveTab("opd"); 
+      triggerAlert("🔓 Receptionist Desk Authenticated!");
+    } else {
+      setLoginError("❌ Incorrect PIN code! Please try again.");
+    }
+    setPinInput("");
+  };
+
+  const handleLogout = () => {
+    setUserRole(null);
+    localStorage.removeItem("sc_active_role");
+    setSelectedToken(null);
+    triggerAlert("🔒 Logged out successfully!");
+  };
 
   const filteredPatients = searchQuery.trim() === "" 
     ? [] 
@@ -314,7 +343,6 @@ export default function Home() {
     setTokenList(prev => [newToken, ...prev]);
     setTokenCounter(prev => prev + 1);
 
-    // Reset Form
     setPatientName("");
     setPatientAge("");
     setPatientPhone("");
@@ -323,8 +351,10 @@ export default function Home() {
     triggerAlert(`🎟️ Token #${tokenCounter} Issued Successfully for PID: ${finalPid}`);
   };
 
-
   const handleCheckPatient = (token: Token) => {
+    if (userRole !== "doctor") {
+      return triggerAlert("🔒 Access Denied: Only Doctor can examine patients!");
+    }
     setSelectedToken(token);
     setPrescription({ complaints: "", Diagnosis: "", medicines: "" });
   };
@@ -355,7 +385,6 @@ export default function Home() {
 
     setVisitsHistory(prev => [newVisitRecord, ...prev]);
 
-    // Open Thermal Prescription Window
     const printWindow = window.open("", "_blank");
     if (!printWindow) return triggerAlert("⚠️ Please allow popups to print prescriptions");
 
@@ -400,7 +429,7 @@ export default function Home() {
           <div class="content-grid">
             ${selectedToken.vitals.bp || selectedToken.vitals.temp || selectedToken.vitals.weight ? `
               <div>
-                <div class="section-title">Vitals / وائٹلز</div>
+                <div class="section-title">Vitals</div>
                 <div style="font-size: 13px; display: flex; gap: 20px;">
                   ${selectedToken.vitals.bp ? `<span><strong>BP:</strong> ${selectedToken.vitals.bp}</span>` : ""}
                   ${selectedToken.vitals.temp ? `<span><strong>Temp:</strong> ${selectedToken.vitals.temp}</span>` : ""}
@@ -410,12 +439,12 @@ export default function Home() {
             ` : ""}
 
             <div>
-              <div class="section-title">Complaints &amp; Symptoms / علامات</div>
+              <div class="section-title">Complaints &amp; Symptoms</div>
               <div style="font-size: 14px; padding-left: 5px;">${prescription.complaints || "Routine Checkup"}</div>
             </div>
 
             <div>
-              <div class="section-title">Diagnosis / تشخیص</div>
+              <div class="section-title">Diagnosis</div>
               <div style="font-size: 14px; padding-left: 5px; font-weight: 500;">${prescription.Diagnosis || "Under Observation"}</div>
             </div>
 
@@ -452,8 +481,6 @@ export default function Home() {
     ? visitsHistory.filter(v => v.pid === selectedToken.pid) 
     : [];
 
-
-  // --- LAB REPORT LOGIC ---
   const handleAddLabReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!reportPatientName || !selectedLabTest || !testResult) {
@@ -479,7 +506,6 @@ export default function Home() {
     setTestResult("");
     triggerAlert("🔬 Lab Report generated and verified successfully!");
   };
-
 
   const handlePrintLabReport = (rep: LabReport) => {
     const printWindow = window.open("", "_blank");
@@ -556,8 +582,6 @@ export default function Home() {
     printWindow.document.close();
   };
 
-
-  // --- PHARMACY LOGIC ---
   const handleAddMedicine = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMedName || !newMedWS || !newMedRT || !newMedQty) {
@@ -591,8 +615,6 @@ export default function Home() {
     triggerAlert("🔄 Inventory stock level adjusted!");
   };
 
-
-  // --- BILLING LOGIC ---
   const handleAddInvoice = (e: React.FormEvent) => {
     e.preventDefault();
     if (!billingPatientName) return triggerAlert("⚠️ Please enter Patient Name!");
@@ -618,7 +640,6 @@ export default function Home() {
 
     setBillingRecords(prev => [newInvoice, ...prev]);
 
-    // Open Thermal Invoice Window
     const printWindow = window.open("", "_blank");
     if (!printWindow) return triggerAlert("⚠️ Please allow popups to print invoices");
 
@@ -662,7 +683,7 @@ export default function Home() {
           </div>
 
           <div class="center mt-10">
-            <p class="bold">🎉 Thank You for choosing us!</p>
+            <p class="bold">Thank You for choosing us!</p>
             <p style="font-size: 9px; color: #555;">Software built by Smart Clinic ERP</p>
           </div>
 
@@ -679,7 +700,6 @@ export default function Home() {
     printWindow.document.write(invoiceHTML);
     printWindow.document.close();
 
-    // Reset Form
     setBillingPid("");
     setBillingPatientName("");
     setBillingPharmTotal("");
@@ -688,8 +708,6 @@ export default function Home() {
     triggerAlert("💳 Invoice logged & printed successfully!");
   };
 
-
-  // --- EXPENSE LOGIC ---
   const handleAddExpense = (e: React.FormEvent) => {
     e.preventDefault();
     if (!expenseTitle || !expenseAmount) return triggerAlert("⚠️ Please enter Title and Amount!");
@@ -713,43 +731,118 @@ export default function Home() {
     triggerAlert("🗑️ Expense Record Deleted!");
   };
 
-  // Calculations for Net Profit margins
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
   const autoOPDRevenue = visitsHistory.length * (clinicConfig.doctor.consultationFee || 500);
   
-  // Calculate Lab & Pharm Revenues dynamically from Billing Records
   const autoLabRevenue = billingRecords.reduce((sum, rec) => sum + (rec.labTotal || 0), 0);
   const autoPharmRevenue = billingRecords.reduce((sum, rec) => sum + (rec.pharmacyTotal || 0), 0);
   
   const totalRevenue = autoOPDRevenue + autoLabRevenue + autoPharmRevenue + manualRevenue;
   const netProfit = totalRevenue - totalExpenses;
 
+  // --- SECURITY SPLASH SCREEN (PIN GATE) ---
+  if (!userRole) {
+    return (
+      <div className="min-h-screen bg-gradient-to-tr from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center p-4">
+        <div className="bg-white/95 backdrop-blur-md rounded-3xl p-8 max-w-md w-full shadow-2xl border border-white/20 text-center">
+          <span className="text-5xl block animate-pulse">🏥</span>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-4">
+            {clinicConfig.clinicName}
+          </h2>
+          <p className="text-xs text-blue-600 font-extrabold tracking-widest uppercase mt-1">Smart Security Gateway</p>
+          <p className="text-xs text-slate-500 mt-2">
+            Please enter your security PIN code to access the ERP terminal dashboard.
+          </p>
+
+          <form onSubmit={handleLoginSubmit} className="mt-8 space-y-4 text-left">
+            <div>
+              <label className="block text-[11px] font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                🔒 Security PIN Code
+              </label>
+              <input 
+                type="password" 
+                maxLength={4}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
+                placeholder="••••" 
+                className="w-full bg-slate-100 text-slate-900 text-center text-2xl tracking-widest font-black py-3 rounded-2xl border-2 border-slate-200 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all"
+              />
+            </div>
+
+            {loginError && (
+              <p className="text-red-500 font-bold text-xs text-center bg-red-50 py-2 rounded-xl">
+                {loginError}
+              </p>
+            )}
+
+            <button 
+              type="submit" 
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3 px-4 rounded-2xl text-sm transition-colors shadow-lg shadow-blue-500/20"
+            >
+              Verify PIN &amp; Unlock Software
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-slate-100 text-[10px] text-slate-400 space-y-1">
+            <p>💡 Hint: Doctor PIN: <strong className="text-slate-600">4142</strong> | Receptionist PIN: <strong className="text-slate-600">1122</strong></p>
+            <p>© {new Date().getFullYear()} • Securely Managed ERP System</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans">
-      {/* Dynamic Top Navigation Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div>
-            <h1 className="text-2xl font-black tracking-tight text-blue-600 flex items-center gap-2">
-              🏥 {clinicConfig.clinicName}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black tracking-tight text-blue-600 flex items-center gap-2">
+                🏥 {clinicConfig.clinicName}
+              </h1>
+              {userRole === "doctor" ? (
+                <span className="bg-blue-100 text-blue-700 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Doctor Desk</span>
+              ) : (
+                <span className="bg-amber-100 text-amber-800 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Receptionist Desk</span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 font-medium mt-0.5">{clinicConfig.tagline}</p>
           </div>
           
-          {/* Main ERP Navigation Tabs */}
           <nav className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button onClick={() => setActiveTab("dashboard")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "dashboard" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>📊 Dash</button>
-            <button onClick={() => setActiveTab("opd")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "opd" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>🎫 OPD</button>
-            <button onClick={() => setActiveTab("lab")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "lab" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>🔬 Lab</button>
-            <button onClick={() => setActiveTab("pharmacy")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "pharmacy" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>📦 Pharmacy</button>
-            <button onClick={() => setActiveTab("billing")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "billing" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>💳 Billing</button>
-            <button onClick={() => setActiveTab("expense")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "expense" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>💸 Expenses</button>
+            {userRole === "doctor" && (
+              <button onClick={() => setActiveTab("dashboard")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "dashboard" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>📊 Dash</button>
+            )}
+            
+            <button onClick={() => setActiveTab("opd")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "opd" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>🎫 OPD &amp; Queue</button>
+            
+            {userRole === "doctor" && (
+              <button onClick={() => setActiveTab("lab")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "lab" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>🔬 Lab Tests</button>
+            )}
+
+            {userRole === "doctor" && (
+              <button onClick={() => setActiveTab("pharmacy")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "pharmacy" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>📦 Pharmacy</button>
+            )}
+
+            <button onClick={() => setActiveTab("billing")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "billing" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>💳 Billing Engine</button>
+            
+            {userRole === "doctor" && (
+              <button onClick={() => setActiveTab("expense")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "expense" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>💸 Expenses Ledger</button>
+            )}
+
+            <button 
+              onClick={handleLogout} 
+              className="text-xs text-red-600 hover:bg-red-50 font-black px-3 py-1.5 rounded-lg transition-all border border-transparent hover:border-red-200"
+              title="Click to lock the ERP console"
+            >
+              🔒 Lock Screen
+            </button>
           </nav>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
-        {/* Dynamic Navigation Cards */}
         {alertMessage && (
           <div className="fixed top-4 right-4 z-50 bg-slate-950 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 border border-slate-700 animate-bounce">
             <span>🔔</span>
@@ -758,9 +851,8 @@ export default function Home() {
         )}
 
         {/* --- DASHBOARD VIEW --- */}
-        {activeTab === "dashboard" && (
+        {activeTab === "dashboard" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
-            {/* Welcome Doctor Banner */}
             <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 sm:p-8 text-white shadow-lg border border-blue-700/50">
               <span className="bg-white/20 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
                 Welcome Back
@@ -793,7 +885,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Live Financial & Patient Statistics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block">OPD Patients Checked</span>
@@ -816,11 +907,10 @@ export default function Home() {
               <div className={`p-5 rounded-2xl border text-white shadow-md ${netProfit >= 0 ? "bg-gradient-to-br from-emerald-500 to-teal-600 border-emerald-500" : "bg-gradient-to-br from-rose-500 to-red-600 border-rose-500"}`}>
                 <span className="text-[10px] font-black uppercase tracking-wider block opacity-95">Daily Net Profit Margin</span>
                 <h3 className="text-2xl font-black mt-1">{netProfit} <span className="text-xs font-medium">PKR</span></h3>
-                <p className="text-[10px] opacity-80 mt-1">{netProfit >= 0 ? "🎉 Outstanding! Positive margins." : "⚠️ Caution: High expense ratios."}</p>
+                <p className="text-[10px] opacity-80 mt-1">{netProfit >= 0 ? "🎉 Positive margins." : "⚠️ Deficit margin caution."}</p>
               </div>
             </div>
 
-            {/* Quick Feature Grid */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4">
               <div onClick={() => setActiveTab("opd")} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group">
                 <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all">👥</span>
@@ -852,10 +942,9 @@ export default function Home() {
         {/* --- OPD VIEW --- */}
         {activeTab === "opd" && (
           <div className="space-y-8 animate-fadeIn">
-            {/* Quick Return Patient Search Box */}
             <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
-              <h4 className="text-sm font-bold mb-1 flex items-center gap-1.5">🔍 Search Returning Patient (پرانے مریض تلاش کریں)</h4>
-              <p className="text-xs text-blue-100 mb-3">Type Name, Phone or Patient ID (PID) to auto-fill without manual entry.</p>
+              <h4 className="text-sm font-bold mb-1 flex items-center gap-1.5">🔍 Search Returning Patient</h4>
+              <p className="text-xs text-blue-100 mb-3">Type Name, Phone or Patient ID (PID) to auto-fill details.</p>
               <div className="relative">
                 <input 
                   type="text" 
@@ -888,7 +977,6 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* OPD Registration Form */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-base font-bold text-slate-900">📝 New Patient Entry</h3>
@@ -943,7 +1031,6 @@ export default function Home() {
                 </form>
               </div>
 
-              {/* Active Token Queue Desk */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-base font-bold text-slate-900">⏳ Active OPD Queue ({tokenList.length})</h3>
@@ -978,7 +1065,14 @@ export default function Home() {
                           {token.vitals.bp && <span className="text-[11px] bg-red-50 text-red-600 font-semibold px-2 py-0.5 rounded border">❤️ {token.vitals.bp}</span>}
                           {token.vitals.temp && <span className="text-[11px] bg-amber-50 text-amber-600 font-semibold px-2 py-0.5 rounded border">🌡️ {token.vitals.temp}</span>}
                           {token.vitals.weight && <span className="text-[11px] bg-emerald-50 text-emerald-600 font-semibold px-2 py-0.5 rounded border">⚖️ {token.vitals.weight}kg</span>}
-                          <button onClick={() => handleCheckPatient(token)} className="text-xs text-white bg-blue-600 hover:bg-blue-700 font-bold px-3 py-1.5 rounded-lg transition-colors ml-2">Check ➡️</button>
+                          
+                          {userRole === "doctor" ? (
+                            <button onClick={() => handleCheckPatient(token)} className="text-xs text-white bg-blue-600 hover:bg-blue-700 font-bold px-3 py-1.5 rounded-lg transition-colors ml-2">Check ➡️</button>
+                          ) : (
+                            <span className="text-[10px] bg-amber-50 text-amber-700 font-bold border border-amber-200 px-2 py-1 rounded-md ml-2 flex items-center gap-1">
+                              🔒 Wait for Doctor
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -987,8 +1081,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Examination Desk & EHR Timeline */}
-            {selectedToken && (
+            {selectedToken && userRole === "doctor" && (
               <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all">
                 <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
                   <div>
@@ -999,7 +1092,6 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-x divide-slate-200">
-                  {/* EHR Left Sidebar */}
                   <div className="lg:col-span-4 bg-slate-50/60 p-6 flex flex-col h-[520px]">
                     <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
                       <h4 className="font-extrabold text-slate-800 border-b pb-1.5 mb-2 flex justify-between">
@@ -1045,7 +1137,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Right Examination Prescription Form */}
                   <div className="lg:col-span-8 p-6 space-y-5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -1059,7 +1150,7 @@ export default function Home() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Rx - Prescription &amp; Medicines (نسخہ تجویز کریں)</label>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Rx - Prescription &amp; Medicines</label>
                       <textarea rows={6} value={prescription.medicines} onChange={(e) => setPrescription({...prescription, medicines: e.target.value})} placeholder="1. Tab Paracetamol 500mg -- 1+1+1 (5 days)&#10;2. Syp Hydryll -- 2 tsp daily" className="w-full px-3 py-2 border rounded-xl text-sm font-mono focus:outline-none focus:border-blue-500" />
                     </div>
 
@@ -1074,10 +1165,9 @@ export default function Home() {
         )}
 
         {/* --- LAB DIAGNOSTICS VIEW --- */}
-        {activeTab === "lab" && (
+        {activeTab === "lab" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Form to log laboratory reports */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <h3 className="text-base font-bold text-slate-900 mb-4">🔬 Enter Observed Lab Values</h3>
                 <form onSubmit={handleAddLabReport} className="space-y-4">
@@ -1109,7 +1199,6 @@ export default function Home() {
                 </form>
               </div>
 
-              {/* Verified Lab Reports Database */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <h3 className="text-base font-bold text-slate-900 mb-4">📋 Verified Laboratory Reports Ledger</h3>
                 {labReports.length === 0 ? (
@@ -1150,9 +1239,8 @@ export default function Home() {
         )}
 
         {/* --- PHARMACY VIEW --- */}
-        {activeTab === "pharmacy" && (
+        {activeTab === "pharmacy" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
-            {/* Low stock indicators warning banner */}
             {medicines.some(m => m.stock <= m.minStockAlert) && (
               <div className="bg-red-50 border border-red-200 p-4 rounded-2xl text-red-800 text-xs flex items-center gap-2">
                 <span>⚠️</span>
@@ -1161,7 +1249,6 @@ export default function Home() {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Add New Medicine to Stock Form */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <h3 className="text-base font-bold text-slate-900 mb-4">📦 Add Medicine to Stock</h3>
                 <form onSubmit={handleAddMedicine} className="space-y-4">
@@ -1196,7 +1283,6 @@ export default function Home() {
                 </form>
               </div>
 
-              {/* Medicine Inventory Stock table */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <h3 className="text-base font-bold text-slate-900 mb-4">📋 Medicine Stock &amp; Inventory Table</h3>
                 <div className="overflow-x-auto">
@@ -1245,7 +1331,6 @@ export default function Home() {
         {activeTab === "billing" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Billing Entry Form */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <h3 className="text-base font-bold text-slate-900 mb-4">💳 Print Invoices &amp; Receipts</h3>
                 <form onSubmit={handleAddInvoice} className="space-y-4">
@@ -1285,7 +1370,6 @@ export default function Home() {
                 </form>
               </div>
 
-              {/* Invoicing Logs history */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <h3 className="text-base font-bold text-slate-900 mb-4">📋 Daily Invoices &amp; Invoicing Transactions</h3>
                 {billingRecords.length === 0 ? (
@@ -1328,24 +1412,23 @@ export default function Home() {
         )}
 
         {/* --- EXPENSES & LEDGER VIEW --- */}
-        {activeTab === "expense" && (
+        {activeTab === "expense" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
-            {/* Live Profit Analyzer header cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block">OPD Income (کل فیس)</span>
+                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block">OPD Income</span>
                 <h3 className="text-2xl font-black text-slate-900 mt-1">{autoOPDRevenue} <span className="text-xs font-medium text-slate-400">PKR</span></h3>
                 <p className="text-[10px] text-slate-400 mt-0.5">Calculated from checked queues</p>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-red-500">
-                <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block">Total Expenses (کل اخراجات)</span>
+                <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block">Total Expenses</span>
                 <h3 className="text-2xl font-black text-slate-900 mt-1">{totalExpenses} <span className="text-xs font-medium text-slate-400">PKR</span></h3>
                 <p className="text-[10px] text-slate-400 mt-0.5">Sum of all records ledger below</p>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Other/Manual Income (دیگر آمدن)</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Other/Manual Income</span>
                 <div className="flex items-center gap-2 mt-1">
                   <input 
                     type="number" 
@@ -1360,19 +1443,18 @@ export default function Home() {
               </div>
 
               <div className={`p-5 rounded-2xl border text-white shadow-md ${netProfit >= 0 ? "bg-gradient-to-br from-emerald-500 to-teal-600 border-emerald-500" : "bg-gradient-to-br from-rose-500 to-red-600 border-rose-500"}`}>
-                <span className="text-[10px] font-black uppercase tracking-widest block opacity-90">Net Profit (خالص منافع)</span>
+                <span className="text-[10px] font-black uppercase tracking-widest block opacity-90">Net Profit</span>
                 <h3 className="text-3xl font-black mt-1">{netProfit} <span className="text-xs font-bold">PKR</span></h3>
-                <p className="text-[10px] opacity-80 mt-0.5">{netProfit >= 0 ? "🎉 Outstanding! Positive balance." : "⚠️ Warning: Deficit margins."}</p>
+                <p className="text-[10px] opacity-80 mt-0.5">{netProfit >= 0 ? "🎉 Positive balance." : "⚠️ Deficit margins."}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Add New Expense Form */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">💸 Log New Expense (اخراجات کا اندراج)</h3>
+                <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">💸 Log New Expense</h3>
                 <form onSubmit={handleAddExpense} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expense Title / تفصیل *</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expense Title *</label>
                     <input type="text" value={expenseTitle} onChange={(e) => setExpenseTitle(e.target.value)} placeholder="e.g. Tea for staff, Paper bundles" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                   </div>
 
@@ -1383,31 +1465,30 @@ export default function Home() {
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date</label>
-                      <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                      <input type="date" value={expenseDate} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Category / زمرہ</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Category</label>
                     <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white focus:outline-none" >
-                      <option value="Tea & Refreshments">Tea &amp; Refreshments — چائے پانی</option>
-                      <option value="Staff Salaries">Staff Salaries — تنخواہ</option>
-                      <option value="Clinic Rent">Clinic Rent — کرایہ</option>
-                      <option value="Utility Bills">Utility Bills — بل</option>
-                      <option value="Stationery & Printing">Stationery — پرنٹنگ کاغذات</option>
-                      <option value="Medicines Purchase">Medicines — ادویات کی خرید</option>
-                      <option value="Others">Others — متفرق اخراجات</option>
+                      <option value="Tea & Refreshments">Tea &amp; Refreshments</option>
+                      <option value="Staff Salaries">Staff Salaries</option>
+                      <option value="Clinic Rent">Clinic Rent</option>
+                      <option value="Utility Bills">Utility Bills</option>
+                      <option value="Stationery & Printing">Stationery &amp; Printing</option>
+                      <option value="Medicines Purchase">Medicines Purchase</option>
+                      <option value="Others">Others</option>
                     </select>
                   </div>
 
-                  <button type="submit" className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-md mt-2">📝 Save Expense (خرچہ درج کریں)</button>
+                  <button type="submit" className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-md mt-2">📝 Save Expense</button>
                 </form>
               </div>
 
-              {/* Expense Ledger Table */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-bold text-slate-900">📋 Expense Ledger History (لیجر کھاتہ)</h3>
+                  <h3 className="text-base font-bold text-slate-900">📋 Expense Ledger</h3>
                   <span className="text-xs bg-red-50 text-red-600 font-bold px-2.5 py-1 rounded-full">{expenses.length} Records</span>
                 </div>
 
