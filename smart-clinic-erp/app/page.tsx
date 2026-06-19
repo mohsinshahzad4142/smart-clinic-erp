@@ -144,6 +144,21 @@ export default function Home() {
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
   const [prescription, setPrescription] = useState({ complaints: "", Diagnosis: "", medicines: "" });
 
+  // --- SMART SUGGESTIONS STATE ---
+  const [suggestedSymptoms, setSuggestedSymptoms] = useState<string[]>([
+    "Fever", "Dry Cough", "Runny Nose", "Sore Throat", "Body Aches", "Headache", "Diarrhea", "Shortness of Breath", "Stomach Pain"
+  ]);
+  const [suggestedDiagnoses, setSuggestedDiagnoses] = useState<string[]>([
+    "Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Typhoid Fever", "Gastroenteritis", "Essential Hypertension", "Type 2 Diabetes Mellitus"
+  ]);
+  const [suggestedMedicines, setSuggestedMedicines] = useState<string[]>([
+    "Tab Paracetamol 500mg (1+1+1)", "Syp Hydryll 120ml (2 tsp x 3)", "Cap Amoxicillin 500mg (1+0+1)", "Tab Flagyl 400mg (1+1+1)", "Tab Ponstan 500mg (1+0+1)"
+  ]);
+
+  const [newSymptomInput, setNewSymptomInput] = useState("");
+  const [newDiagnosisInput, setNewDiagnosisInput] = useState("");
+  const [newMedicineInput, setNewMedicineInput] = useState("");
+
   // Expense Form
   const [expenseTitle, setExpenseTitle] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
@@ -172,7 +187,6 @@ export default function Home() {
   const [billingLabTotal, setBillingLabTotal] = useState("");
   const [billingDiscount, setBillingDiscount] = useState("0");
 
-  // Load persistence configurations on Mount
   useEffect(() => {
     setMounted(true);
     setExpenseDate(new Date().toISOString().split("T")[0]);
@@ -191,6 +205,11 @@ export default function Home() {
     loadData("sc_lab_reports", setLabReports);
     loadData("sc_billing_records", setBillingRecords);
 
+    // Load templates
+    loadData("sc_suggested_symptoms", setSuggestedSymptoms);
+    loadData("sc_suggested_diagnoses", setSuggestedDiagnoses);
+    loadData("sc_suggested_medicines", setSuggestedMedicines);
+
     const storedCounter = localStorage.getItem("sc_token_counter");
     if (storedCounter) setTokenCounter(parseInt(storedCounter, 10));
     
@@ -203,7 +222,6 @@ export default function Home() {
     }
   }, []);
 
-  // Sync state transitions to browser LocalStorage
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem("sc_patients", JSON.stringify(patientsList));
@@ -248,6 +266,22 @@ export default function Home() {
     if (!mounted) return;
     localStorage.setItem("sc_manual_rev", manualRevenue.toString());
   }, [manualRevenue, mounted]);
+
+  // Persist template items
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_suggested_symptoms", JSON.stringify(suggestedSymptoms));
+  }, [suggestedSymptoms, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_suggested_diagnoses", JSON.stringify(suggestedDiagnoses));
+  }, [suggestedDiagnoses, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem("sc_suggested_medicines", JSON.stringify(suggestedMedicines));
+  }, [suggestedMedicines, mounted]);
 
   if (!mounted) {
     return (
@@ -366,6 +400,70 @@ export default function Home() {
       medicines: pastVisit.medicines
     });
     triggerAlert("📋 Past Prescription Copied to Current Desk!");
+  };
+
+  const appendSymptom = (sym: string) => {
+    setPrescription(prev => {
+      const current = prev.complaints.trim();
+      const updated = current ? `${current}, ${sym}` : sym;
+      return { ...prev, complaints: updated };
+    });
+  };
+
+  const appendDiagnosis = (diag: string) => {
+    setPrescription(prev => {
+      const current = prev.Diagnosis.trim();
+      const updated = current ? `${current}, ${diag}` : diag;
+      return { ...prev, Diagnosis: updated };
+    });
+  };
+
+  const appendMedicine = (med: string) => {
+    setPrescription(prev => {
+      const current = prev.medicines.trim();
+      const lines = current ? current.split('\n').filter(l => l.trim() !== '') : [];
+      const nextIndex = lines.length + 1;
+      const cleanMed = med.replace(/^\d+\.\s*/, ''); // Remove numbering if already exists
+      const formattedMed = `${nextIndex}. ${cleanMed}`;
+      const updated = current ? `${current}\n${formattedMed}` : formattedMed;
+      return { ...prev, medicines: updated };
+    });
+  };
+
+  const addNewSymptomTemplate = () => {
+    if (!newSymptomInput.trim()) return;
+    if (suggestedSymptoms.includes(newSymptomInput.trim())) return;
+    setSuggestedSymptoms(prev => [...prev, newSymptomInput.trim()]);
+    setNewSymptomInput("");
+    triggerAlert("✨ New Symptom template added!");
+  };
+
+  const addNewDiagnosisTemplate = () => {
+    if (!newDiagnosisInput.trim()) return;
+    if (suggestedDiagnoses.includes(newDiagnosisInput.trim())) return;
+    setSuggestedDiagnoses(prev => [...prev, newDiagnosisInput.trim()]);
+    setNewDiagnosisInput("");
+    triggerAlert("✨ New Diagnosis template added!");
+  };
+
+  const addNewMedicineTemplate = () => {
+    if (!newMedicineInput.trim()) return;
+    if (suggestedMedicines.includes(newMedicineInput.trim())) return;
+    setSuggestedMedicines(prev => [...prev, newMedicineInput.trim()]);
+    setNewMedicineInput("");
+    triggerAlert("✨ New Medicine template added!");
+  };
+
+  const deleteSymptomTemplate = (sym: string) => {
+    setSuggestedSymptoms(prev => prev.filter(s => s !== sym));
+  };
+
+  const deleteDiagnosisTemplate = (diag: string) => {
+    setSuggestedDiagnoses(prev => prev.filter(d => d !== diag));
+  };
+
+  const deleteMedicineTemplate = (med: string) => {
+    setSuggestedMedicines(prev => prev.filter(m => m !== med));
   };
 
   const handlePrintPrescription = () => {
@@ -740,7 +838,6 @@ export default function Home() {
   const totalRevenue = autoOPDRevenue + autoLabRevenue + autoPharmRevenue + manualRevenue;
   const netProfit = totalRevenue - totalExpenses;
 
-  // --- SECURITY SPLASH SCREEN (PIN GATE) ---
   if (!userRole) {
     return (
       <div className="min-h-screen bg-gradient-to-tr from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center p-4">
@@ -794,6 +891,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans">
+      {}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div>
@@ -851,6 +949,7 @@ export default function Home() {
         )}
 
         {/* --- DASHBOARD VIEW --- */}
+        {}
         {activeTab === "dashboard" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 sm:p-8 text-white shadow-lg border border-blue-700/50">
@@ -919,7 +1018,7 @@ export default function Home() {
               </div>
 
               <div onClick={() => setActiveTab("lab")} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all cursor-pointer group">
-                <span className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-amber-500 group-hover:text-white transition-all">🔬</span>
+                <span className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-amber-505 group-hover:text-white transition-all">🔬</span>
                 <h4 className="text-sm font-bold text-slate-900">Diagnostics Lab</h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">Input laboratory observed test values & generate printouts.</p>
               </div>
@@ -940,6 +1039,7 @@ export default function Home() {
         )}
 
         {/* --- OPD VIEW --- */}
+        {}
         {activeTab === "opd" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
@@ -1081,6 +1181,7 @@ export default function Home() {
               </div>
             </div>
 
+            {}
             {selectedToken && userRole === "doctor" && (
               <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all">
                 <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
@@ -1092,13 +1193,15 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-x divide-slate-200">
-                  <div className="lg:col-span-4 bg-slate-50/60 p-6 flex flex-col h-[520px]">
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
+                  
+                  {/* Left Column: Demographics & History (3 Cols) */}
+                  <div className="lg:col-span-3 bg-slate-50/60 p-5 flex flex-col h-[540px]">
+                    <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
                       <h4 className="font-extrabold text-slate-800 border-b pb-1.5 mb-2 flex justify-between">
                         <span>📋 Demographics</span>
                         <span className="text-blue-600">{selectedToken.pid}</span>
                       </h4>
-                      <p><strong className="text-slate-500">Gender/Age:</strong> {selectedToken.gender}, {selectedToken.age} Years</p>
+                      <p><strong className="text-slate-500">Gender/Age:</strong> {selectedToken.gender}, {selectedToken.age} Yrs</p>
                       <p><strong className="text-slate-500">Phone:</strong> {selectedToken.phone || "N/A"}</p>
                       <div className="pt-2 border-t text-slate-600">
                         <p className="font-semibold text-slate-700">Initial Vitals:</p>
@@ -1110,26 +1213,26 @@ export default function Home() {
 
                     <div className="flex-1 flex flex-col min-h-0">
                       <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex justify-between">
-                        <span>📜 EHR History Timeline</span>
-                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-[9px] font-bold">{currentPatientHistory.length} Previous Visits</span>
+                        <span>📜 EHR History</span>
+                        <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-bold">{currentPatientHistory.length} Visits</span>
                       </h4>
 
                       {currentPatientHistory.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center border border-dashed rounded-xl bg-white p-6 text-center">
+                        <div className="flex-1 flex flex-col items-center justify-center border border-dashed rounded-xl bg-white p-4 text-center">
                           <p className="text-lg">🆕</p>
                           <p className="text-xs font-bold text-slate-400 mt-1">First Time Visit</p>
                         </div>
                       ) : (
                         <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
                           {currentPatientHistory.map((visit) => (
-                            <div key={visit.id} className="bg-white p-3 rounded-xl border border-slate-200 relative">
+                            <div key={visit.id} className="bg-white p-2.5 rounded-xl border border-slate-200 relative">
                               <div className="flex justify-between items-center mb-1">
-                                <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded text-[9px]">📅 {visit.date}</span>
+                                <span className="bg-slate-100 text-slate-700 font-bold px-1.5 py-0.5 rounded text-[9px]">📅 {visit.date}</span>
                                 <button onClick={() => handleCloneVisit(visit)} className="text-[9px] font-extrabold text-blue-600 hover:underline">📋 Copy Rx</button>
                               </div>
-                              <p className="text-[11px] text-slate-600"><strong>Complaints:</strong> {visit.complaints}</p>
-                              <p className="text-[11px] text-slate-600"><strong>Diagnosis:</strong> {visit.diagnosis}</p>
-                              <p className="bg-slate-50 p-1.5 rounded font-mono text-[10px] mt-1 text-slate-700 whitespace-pre-wrap border-l-2 border-blue-400">{visit.medicines}</p>
+                              <p className="text-[11px] text-slate-600"><strong>Symptoms:</strong> {visit.complaints}</p>
+                              <p className="text-[11px] text-slate-600"><strong>Diag:</strong> {visit.diagnosis}</p>
+                              <p className="bg-slate-50 p-1 rounded font-mono text-[9px] mt-1 text-slate-700 whitespace-pre-wrap border-l-2 border-blue-400">{visit.medicines}</p>
                             </div>
                           ))}
                         </div>
@@ -1137,27 +1240,89 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="lg:col-span-8 p-6 space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Center Column: Form (6 Cols) */}
+                  <div className="lg:col-span-6 p-5 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Symptoms / Complaints</label>
-                        <textarea rows={3} value={prescription.complaints} onChange={(e) => setPrescription({...prescription, complaints: e.target.value})} placeholder="e.g. Cough, Fever, Body aches" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                        <textarea rows={3} value={prescription.complaints} onChange={(e) => setPrescription({...prescription, complaints: e.target.value})} placeholder="e.g. Cough, Fever, Body aches" className="w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-blue-500" />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Diagnosis</label>
-                        <textarea rows={3} value={prescription.Diagnosis} onChange={(e) => setPrescription({...prescription, Diagnosis: e.target.value})} placeholder="e.g. Upper Respiratory Tract Infection" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                        <textarea rows={3} value={prescription.Diagnosis} onChange={(e) => setPrescription({...prescription, Diagnosis: e.target.value})} placeholder="e.g. Upper Respiratory Tract Infection" className="w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-blue-500" />
                       </div>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Rx - Prescription &amp; Medicines</label>
-                      <textarea rows={6} value={prescription.medicines} onChange={(e) => setPrescription({...prescription, medicines: e.target.value})} placeholder="1. Tab Paracetamol 500mg -- 1+1+1 (5 days)&#10;2. Syp Hydryll -- 2 tsp daily" className="w-full px-3 py-2 border rounded-xl text-sm font-mono focus:outline-none focus:border-blue-500" />
+                      <textarea rows={7} value={prescription.medicines} onChange={(e) => setPrescription({...prescription, medicines: e.target.value})} placeholder="1. Tab Paracetamol 500mg -- 1+1+1 (5 days)&#10;2. Syp Hydryll -- 2 tsp daily" className="w-full px-3 py-2 border rounded-xl text-xs font-mono focus:outline-none focus:border-blue-500" />
                     </div>
 
                     <div className="flex justify-end pt-3 border-t">
-                      <button onClick={handlePrintPrescription} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl text-sm shadow-md flex items-center gap-2">🖨️ Save &amp; Print Prescription</button>
+                      <button onClick={handlePrintPrescription} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded-xl text-xs shadow-md flex items-center gap-2">🖨️ Save &amp; Print Prescription</button>
                     </div>
                   </div>
+
+                  {/* Right Column: Smart Suggestions Sidebar (3 Cols) */}
+                  <div className="lg:col-span-3 bg-slate-50/60 p-4 flex flex-col h-[540px] overflow-hidden">
+                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 border-b pb-1">⚡ Smart Suggestions</h4>
+                    
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs">
+                      
+                      {/* Symptoms Suggestions */}
+                      <div className="space-y-1.5">
+                        <span className="font-extrabold text-blue-600 block text-[10px] uppercase">Complaints / Symptoms</span>
+                        <div className="flex flex-wrap gap-1">
+                          {suggestedSymptoms.map(sym => (
+                            <span key={sym} className="group relative bg-white hover:bg-blue-100 border text-slate-700 hover:text-blue-800 px-2 py-0.5 rounded-full cursor-pointer transition-all flex items-center gap-1">
+                              <span onClick={() => appendSymptom(sym)}>{sym}</span>
+                              <span onClick={() => deleteSymptomTemplate(sym)} className="hidden group-hover:inline text-red-500 font-bold ml-1 hover:text-red-700">×</span>
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex gap-1 mt-1">
+                          <input type="text" value={newSymptomInput} onChange={(e) => setNewSymptomInput(e.target.value)} placeholder="Add new symptom" className="flex-1 px-2 py-0.5 text-[11px] border rounded bg-white" />
+                          <button onClick={addNewSymptomTemplate} className="bg-blue-600 text-white px-2 py-0.5 rounded font-black">+</button>
+                        </div>
+                      </div>
+
+                      {/* Diagnosis Suggestions */}
+                      <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                        <span className="font-extrabold text-blue-600 block text-[10px] uppercase">Diagnosis</span>
+                        <div className="flex flex-wrap gap-1">
+                          {suggestedDiagnoses.map(diag => (
+                            <span key={diag} className="group relative bg-white hover:bg-blue-100 border text-slate-700 hover:text-blue-800 px-2 py-0.5 rounded-full cursor-pointer transition-all flex items-center gap-1">
+                              <span onClick={() => appendDiagnosis(diag)}>{diag}</span>
+                              <span onClick={() => deleteDiagnosisTemplate(diag)} className="hidden group-hover:inline text-red-500 font-bold ml-1 hover:text-red-700">×</span>
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex gap-1 mt-1">
+                          <input type="text" value={newDiagnosisInput} onChange={(e) => setNewDiagnosisInput(e.target.value)} placeholder="Add diagnosis" className="flex-1 px-2 py-0.5 text-[11px] border rounded bg-white" />
+                          <button onClick={addNewDiagnosisTemplate} className="bg-blue-600 text-white px-2 py-0.5 rounded font-black">+</button>
+                        </div>
+                      </div>
+
+                      {/* Medicines Suggestions */}
+                      <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                        <span className="font-extrabold text-blue-600 block text-[10px] uppercase">Medicines / Rx Templates</span>
+                        <div className="flex flex-col gap-1">
+                          {suggestedMedicines.map(med => (
+                            <div key={med} className="group flex justify-between items-center bg-white hover:bg-blue-50 border p-1.5 rounded-lg cursor-pointer transition-all">
+                              <span onClick={() => appendMedicine(med)} className="flex-1 text-[11px] font-medium text-slate-700">{med}</span>
+                              <span onClick={() => deleteMedicineTemplate(med)} className="hidden group-hover:inline text-red-500 font-bold ml-1 hover:text-red-700">×</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-1 mt-1">
+                          <input type="text" value={newMedicineInput} onChange={(e) => setNewMedicineInput(e.target.value)} placeholder="Add prescription" className="flex-1 px-2 py-0.5 text-[11px] border rounded bg-white" />
+                          <button onClick={addNewMedicineTemplate} className="bg-blue-600 text-white px-2 py-0.5 rounded font-black">+</button>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+
                 </div>
               </div>
             )}
@@ -1165,6 +1330,7 @@ export default function Home() {
         )}
 
         {/* --- LAB DIAGNOSTICS VIEW --- */}
+        {}
         {activeTab === "lab" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1239,6 +1405,7 @@ export default function Home() {
         )}
 
         {/* --- PHARMACY VIEW --- */}
+        {}
         {activeTab === "pharmacy" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             {medicines.some(m => m.stock <= m.minStockAlert) && (
@@ -1328,6 +1495,7 @@ export default function Home() {
         )}
 
         {/* --- BILLING VIEW --- */}
+        {}
         {activeTab === "billing" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1412,6 +1580,7 @@ export default function Home() {
         )}
 
         {/* --- EXPENSES & LEDGER VIEW --- */}
+        {}
         {activeTab === "expense" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
