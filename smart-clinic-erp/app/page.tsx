@@ -9,7 +9,7 @@ const clinicConfig = {
   tagline: "Your Health, Our Top Priority",
   currency: "PKR", 
   doctor: {
-    name: "Dr. Javed Iqbal",
+    name: "Dr. Mohsin Shahzad",
     degree: "MBBS, FCPS (Medicine)",
     specialty: "Consultant Physician & Specialist",
     consultationFee: 500,
@@ -70,10 +70,13 @@ interface LabTest {
 
 interface LabReport {
   id: string;
-  patientName: string;
+  patientName?: string;
+  patient_name?: string;
   pid: string;
-  testName: string;
-  resultValue: string;
+  testName?: string;
+  test_name?: string;
+  resultValue?: string;
+  result_value?: string;
   date: string;
   status: string;
 }
@@ -81,21 +84,29 @@ interface LabReport {
 interface Medicine {
   id: string;
   name: string;
-  wholesalePrice: number;
-  retailPrice: number;
+  wholesalePrice?: number;
+  wholesale_price?: number;
+  retailPrice?: number;
+  retail_price?: number;
   stock: number;
-  minStockAlert: number;
+  minStockAlert?: number;
+  min_stock_alert?: number;
 }
 
 interface Invoice {
   id: string;
-  patientName: string;
+  patientName?: string;
+  patient_name?: string;
   pid: string;
-  opdFee: number;
-  pharmacyTotal: number;
-  labTotal: number;
+  opdFee?: number;
+  opd_fee?: number;
+  pharmacyTotal?: number;
+  pharmacy_total?: number;
+  labTotal?: number;
+  lab_total?: number;
   discount: number;
-  grandTotal: number;
+  grandTotal?: number;
+  grand_total?: number;
   date: string;
 }
 
@@ -777,12 +788,12 @@ export default function Home() {
     const printWindow = window.open("", "_blank");
     if (!printWindow) return triggerAlert("⚠️ Please allow popups to print laboratory reports!");
 
-    const testObject = labTestsCatalog.find(t => t.name === rep.testName);
+    const testObject = labTestsCatalog.find(t => t.name === (rep.testName || rep.test_name));
 
     const reportHTML = `
       <html>
         <head>
-          <title>Lab Report - ${rep.patientName}</title>
+          <title>Lab Report - ${rep.patientName || rep.patient_name}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 40px; color: #1e293b; }
             .header { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 20px; }
@@ -804,7 +815,7 @@ export default function Home() {
           
           <table class="info-table">
             <tr>
-              <td><strong>Patient Name:</strong> ${rep.patientName}</td>
+              <td><strong>Patient Name:</strong> ${rep.patientName || rep.patient_name}</td>
               <td><strong>Patient ID (PID):</strong> ${rep.pid}</td>
             </tr>
             <tr>
@@ -823,8 +834,8 @@ export default function Home() {
             </thead>
             <tbody>
               <tr>
-                <td><strong>${rep.testName}</strong></td>
-                <td style="font-size: 16px; font-weight: bold; color: #1e3a8a;">${rep.resultValue}</td>
+                <td><strong>${rep.testName || rep.test_name}</strong></td>
+                <td style="font-size: 16px; font-weight: bold; color: #1e3a8a;">${rep.resultValue || rep.result_value}</td>
                 <td>${testObject?.referenceRange || "Standard"}</td>
               </tr>
             </tbody>
@@ -1073,8 +1084,8 @@ export default function Home() {
   const totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
   const autoOPDRevenue = visitsHistory.length * (clinicConfig.doctor.consultationFee || 500);
   
-  const autoLabRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.labTotal) || 0), 0);
-  const autoPharmRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.pharmacyTotal) || 0), 0);
+  const autoLabRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.labTotal ?? rec.lab_total) || 0), 0);
+  const autoPharmRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.pharmacyTotal ?? rec.pharmacy_total) || 0), 0);
   
   const totalRevenue = autoOPDRevenue + autoLabRevenue + autoPharmRevenue + manualRevenue;
   const netProfit = totalRevenue - totalExpenses;
@@ -1236,12 +1247,12 @@ export default function Home() {
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block">OPD Patients Checked</span>
                 <h3 className="text-2xl font-black text-slate-955 mt-1">{visitsHistory.length} <span className="text-xs font-normal text-slate-400">Visits</span></h3>
-                <p className="text-[10px] text-slate-400 mt-1">Total visits recorded dynamically</p>
+                <p className="text-[10px] text-slate-400 mt-1">Total daily visits recorded</p>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block">Total Clinic Revenue</span>
-                <h3 className="text-2xl font-black text-slate-950 mt-1">{totalRevenue} <span className="text-xs font-normal text-slate-400">PKR</span></h3>
+                <h3 className="text-2xl font-black text-slate-955 mt-1">{totalRevenue} <span className="text-xs font-normal text-slate-400">PKR</span></h3>
                 <p className="text-[10px] text-slate-400 mt-1">OPD + Pharmacy + Lab + Manual</p>
               </div>
 
@@ -1385,7 +1396,7 @@ export default function Home() {
                 </div>
 
                 {tokenList.length === 0 ? (
-                  <div className="text-center py-16 border-2 border-dashed border-slate-100 rounded-xl bg-slate-50/50">
+                  <div className="text-center py-16 border-2 border-dashed rounded-xl bg-slate-50/50">
                     <p className="text-2xl mb-1">📭</p>
                     <p className="text-sm font-semibold text-slate-400">No active queue</p>
                     <p className="text-xs text-slate-400 mt-0.5">Issue new patient tokens to begin.</p>
@@ -1633,10 +1644,10 @@ export default function Home() {
                         {labReports.map(rep => (
                           <tr key={rep.id} className="hover:bg-slate-50">
                             <td className="py-3">{rep.date}</td>
-                            <td className="font-bold">{rep.patientName}</td>
+                            <td className="font-bold">{rep.patientName || rep.patient_name}</td>
                             <td><span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">{rep.pid}</span></td>
-                            <td className="font-semibold text-blue-600">{rep.testName}</td>
-                            <td className="font-mono">{rep.resultValue}</td>
+                            <td className="font-semibold text-blue-600">{rep.testName || rep.test_name}</td>
+                            <td className="font-mono">{rep.resultValue || rep.result_value}</td>
                             <td className="text-center"><button onClick={() => handlePrintLabReport(rep)} className="text-xs bg-slate-100 hover:bg-blue-100 text-blue-600 font-bold px-2.5 py-1 rounded-md transition-colors">🖨️ Print</button></td>
                           </tr>
                         ))}
@@ -1652,7 +1663,7 @@ export default function Home() {
         {/* --- PHARMACY VIEW --- */}
         {activeTab === "pharmacy" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
-            {medicines.some(m => m.stock <= m.minStockAlert) && (
+            {medicines.some(m => m.stock <= (m.minStockAlert ?? m.min_stock_alert ?? 20)) && (
               <div className="bg-red-50 border border-red-200 p-4 rounded-2xl text-red-800 text-xs flex items-center gap-2">
                 <span>⚠️</span>
                 <p className="font-bold">Caution: Low stock alert triggered for some pharmacy medicine items! Please audit wholesale items.</p>
@@ -1712,11 +1723,11 @@ export default function Home() {
                       {medicines.map(m => (
                         <tr key={m.id} className="hover:bg-slate-50">
                           <td className="py-3 font-bold">{m.name}</td>
-                          <td className="text-right font-mono">{m.wholesalePrice || m.wholesale_price} PKR</td>
-                          <td className="text-right font-mono text-emerald-600 font-bold">{m.retailPrice || m.retail_price} PKR</td>
-                          <td className={`text-center font-black font-mono ${m.stock <= m.minStockAlert ? "text-red-500" : "text-slate-900"}`}>{m.stock}</td>
+                          <td className="text-right font-mono">{(m.wholesalePrice ?? m.wholesale_price ?? 0)} PKR</td>
+                          <td className="text-right font-mono text-emerald-600 font-bold">{(m.retailPrice ?? m.retail_price ?? 0)} PKR</td>
+                          <td className={`text-center font-black font-mono ${m.stock <= (m.minStockAlert ?? m.min_stock_alert ?? 20) ? "text-red-500" : "text-slate-900"}`}>{m.stock}</td>
                           <td className="text-center">
-                            {m.stock <= m.minStockAlert ? (
+                            {m.stock <= (m.minStockAlert ?? m.min_stock_alert ?? 20) ? (
                               <span className="bg-red-50 text-red-600 font-bold px-2 py-0.5 rounded text-[9px] border border-red-100">Low Stock</span>
                             ) : (
                               <span className="bg-emerald-50 text-emerald-600 font-bold px-2 py-0.5 rounded text-[9px] border border-emerald-100">In Stock</span>
@@ -1835,7 +1846,7 @@ export default function Home() {
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-red-500">
                 <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block">Total Expenses</span>
                 <h3 className="text-2xl font-black text-slate-900 mt-1">{totalExpenses} <span className="text-xs font-medium text-slate-400">PKR</span></h3>
-                <p className="text-[10px] text-slate-400 mt-0.5">Sum of all records ledger below</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Sum of all daily recorded logs</p>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -1942,4 +1953,3 @@ export default function Home() {
     </div>
   );
 }
-
