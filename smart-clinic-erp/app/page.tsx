@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
+// Clinic Configuration
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
   currency: "PKR", 
   doctor: {
-    name: "Dr. Mohsin Shahzad",
+    name: "Dr. Javed Iqbal",
     degree: "MBBS, FCPS (Medicine)",
     specialty: "Consultant Physician & Specialist",
     consultationFee: 500,
@@ -17,6 +19,15 @@ const clinicConfig = {
     address: "Main Multan Road, Near General Hospital, Pakistan",
   }
 };
+
+// Supabase Hybrid Client Setup with Local Fallback
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+let supabase: SupabaseClient | null = null;
+
+if (supabaseUrl && supabaseAnonKey) {
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+}
 
 interface Patient {
   pid: string;
@@ -100,6 +111,7 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [dbStatus, setDbStatus] = useState<"connected" | "local">("local");
 
   // --- ROLE MANAGEMENT STATES ---
   const [userRole, setUserRole] = useState<"doctor" | "receptionist" | null>(null);
@@ -187,13 +199,36 @@ export default function Home() {
   const [billingLabTotal, setBillingLabTotal] = useState("");
   const [billingDiscount, setBillingDiscount] = useState("0");
 
+  // --- INITIAL DATA SYNC LOAD ---
   useEffect(() => {
     setMounted(true);
     setExpenseDate(new Date().toISOString().split("T")[0]);
 
+    const activeSessionRole = localStorage.getItem("sc_active_role");
+    if (activeSessionRole === "doctor" || activeSessionRole === "receptionist") {
+      setUserRole(activeSessionRole);
+    }
+
+    if (supabase) {
+      setDbStatus("connected");
+      fetchDataFromSupabase();
+      subscribeToRealtimeChanges();
+    } else {
+      setDbStatus("local");
+      loadLocalBackup();
+    }
+  }, []);
+
+  const loadLocalBackup = () => {
     const loadData = (key: string, setter: Function) => {
-      const stored = localStorage.getItem(key);
-      if (stored) setter(JSON.parse(stored));
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored && stored.trim() !== "" && stored !== "undefined") {
+          setter(JSON.parse(stored));
+        }
+      } catch (err) {
+        console.warn(`Error parsing localStorage key "${key}":`, err);
+      }
     };
 
     loadData("sc_patients", setPatientsList);
@@ -201,73 +236,125 @@ export default function Home() {
     loadData("sc_tokens", setTokenList);
     loadData("sc_expenses", setExpenses);
     loadData("sc_medicines", setMedicines);
-    loadData("sc_lab_tests", setLabTestsCatalog);
     loadData("sc_lab_reports", setLabReports);
     loadData("sc_billing_records", setBillingRecords);
 
-    // Load templates
+    // Templates
     loadData("sc_suggested_symptoms", setSuggestedSymptoms);
     loadData("sc_suggested_diagnoses", setSuggestedDiagnoses);
     loadData("sc_suggested_medicines", setSuggestedMedicines);
 
     const storedCounter = localStorage.getItem("sc_token_counter");
-    if (storedCounter) setTokenCounter(parseInt(storedCounter, 10));
-    
+    if (storedCounter) setTokenCounter(parseInt(storedCounter, 10) || 1);
+
     const storedManualRev = localStorage.getItem("sc_manual_rev");
-    if (storedManualRev) setManualRevenue(Number(storedManualRev));
+    if (storedManualRev) setManualRevenue(Number(storedManualRev) || 0);
+  };
 
-    const activeSessionRole = localStorage.getItem("sc_active_role");
-    if (activeSessionRole === "doctor" || activeSessionRole === "receptionist") {
-      setUserRole(activeSessionRole);
+  // Fetch Database tables on boot
+  const fetchDataFromSupabase = async () => {
+    if (!supabase) return;
+    try {
+      const { data: pList } = await supabase.from("patients").select("*").order("created_at", { ascending: false });
+      if (pList) setPatientsList(pList);
+
+      const { data: tList } = await supabase.from("tokens").select("*").order("token_number", { ascending: true });
+      if (tList) {
+        setTokenList(tList);
+        // Set token counter dynamically to avoid duplicate token numbers
+        const maxToken = tList.reduce((max, t) => t.token_number > max ? t.token_number : max, 0);
+        setTokenCounter(maxToken + 1);
+      }
+
+      const { data: vList } = await supabase.from("visits").select("*").order("created_at", { ascending: false });
+      if (vList) setVisitsHistory(vList);
+
+      const { data: eList } = await supabase.from("expenses").select("*").order("created_at", { ascending: false });
+      if (eList) setExpenses(eList);
+
+      const { data: mList } = await supabase.from("medicines").select("*").order("created_at", { ascending: false });
+      if (mList && mList.length > 0) setMedicines(mList);
+
+      const { data: lList } = await supabase.from("lab_reports").select("*").order("created_at", { ascending: false });
+      if (lList) setLabReports(lList);
+
+      const { data: bList } = await supabase.from("billing_records").select("*").order("created_at", { ascending: false });
+      if (bList) setBillingRecords(bList);
+    } catch (e) {
+      console.warn("Supabase connection error. Running locally.", e);
+      setDbStatus("local");
+      loadLocalBackup();
     }
-  }, []);
+  };
 
+  // Live Subscription for Instant Doctor-Receptionist Sync
+  const subscribeToRealtimeChanges = () => {
+    if (!supabase) return;
+
+    supabase
+      .channel("realtime-clinic")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tokens" }, () => {
+        fetchDataFromSupabase();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "patients" }, () => {
+        fetchDataFromSupabase();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "visits" }, () => {
+        fetchDataFromSupabase();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
+        fetchDataFromSupabase();
+      })
+      .subscribe();
+  };
+
+  // --- LOCAL PERSISTENCE BACKUPS (Runs in background) ---
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_patients", JSON.stringify(patientsList));
-  }, [patientsList, mounted]);
+  }, [patientsList, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_visits", JSON.stringify(visitsHistory));
-  }, [visitsHistory, mounted]);
+  }, [visitsHistory, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_tokens", JSON.stringify(tokenList));
-  }, [tokenList, mounted]);
+  }, [tokenList, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_token_counter", tokenCounter.toString());
-  }, [tokenCounter, mounted]);
+  }, [tokenCounter, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_expenses", JSON.stringify(expenses));
-  }, [expenses, mounted]);
+  }, [expenses, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_medicines", JSON.stringify(medicines));
-  }, [medicines, mounted]);
+  }, [medicines, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_lab_reports", JSON.stringify(labReports));
-  }, [labReports, mounted]);
+  }, [labReports, mounted, dbStatus]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || dbStatus === "connected") return;
     localStorage.setItem("sc_billing_records", JSON.stringify(billingRecords));
-  }, [billingRecords, mounted]);
+  }, [billingRecords, mounted, dbStatus]);
 
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem("sc_manual_rev", manualRevenue.toString());
   }, [manualRevenue, mounted]);
 
-  // Persist template items
+  // Persist templates globally
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem("sc_suggested_symptoms", JSON.stringify(suggestedSymptoms));
@@ -344,27 +431,47 @@ export default function Home() {
     triggerAlert(`Existing Patient Selected: ${patient.name} (${patient.pid})`);
   };
 
-  const handlePatientSubmit = (e: React.FormEvent) => {
+  const handlePatientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!patientName || !patientAge) return triggerAlert("⚠️ Please enter Patient Name and Age!");
 
     let finalPid = selectedExistingPid;
 
+    // A. Generate/Save Patient Profile
     if (!finalPid) {
-      const generatedNumber = 1001 + patientsList.length;
-      finalPid = `PID-${generatedNumber}`;
-      const newPatientRecord: Patient = {
-        pid: finalPid,
-        name: patientName,
-        age: patientAge,
-        gender: patientGender,
-        phone: patientPhone
-      };
-      setPatientsList(prev => [newPatientRecord, ...prev]);
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from("patients")
+            .insert([{ name: patientName, age: patientAge, gender: patientGender, phone: patientPhone }])
+            .select()
+            .single();
+          if (error) throw error;
+          if (data) {
+            finalPid = data.pid;
+            setPatientsList(prev => [data, ...prev]);
+          }
+        } catch (err) {
+          console.error("Supabase patient insert error:", err);
+          return triggerAlert("❌ Database error during patient saving!");
+        }
+      } else {
+        const generatedNumber = 1001 + patientsList.length;
+        finalPid = `PID-${generatedNumber}`;
+        const newPatientRecord: Patient = {
+          pid: finalPid,
+          name: patientName,
+          age: patientAge,
+          gender: patientGender,
+          phone: patientPhone
+        };
+        setPatientsList(prev => [newPatientRecord, ...prev]);
+      }
     }
 
-    const newToken: Token = {
-      tokenNumber: tokenCounter,
+    // B. Issue Token Queue Instance
+    const newToken = {
+      token_number: tokenCounter,
       pid: finalPid,
       name: patientName,
       age: patientAge,
@@ -374,15 +481,37 @@ export default function Home() {
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setTokenList(prev => [newToken, ...prev]);
-    setTokenCounter(prev => prev + 1);
+    if (supabase) {
+      try {
+        const { error } = await supabase.from("tokens").insert([newToken]);
+        if (error) throw error;
+        // Realtime listener triggers local update
+      } catch (err) {
+        console.error("Supabase token insert error:", err);
+        return triggerAlert("❌ Database error during token queueing!");
+      }
+    } else {
+      // Local Fallback Queue state update
+      const localToken: Token = {
+        tokenNumber: tokenCounter,
+        pid: finalPid || "N/A",
+        name: patientName,
+        age: patientAge,
+        gender: patientGender,
+        phone: patientPhone,
+        vitals: patientVitals,
+        time: newToken.time,
+      };
+      setTokenList(prev => [...prev, localToken]);
+      setTokenCounter(prev => prev + 1);
+    }
 
     setPatientName("");
     setPatientAge("");
     setPatientPhone("");
     setPatientVitals({ bp: "", temp: "", weight: "" });
     setSelectedExistingPid(null);
-    triggerAlert(`🎟️ Token #${tokenCounter} Issued Successfully for PID: ${finalPid}`);
+    triggerAlert(`🎟️ Token Issued Successfully for PID: ${finalPid}`);
   };
 
   const handleCheckPatient = (token: Token) => {
@@ -466,11 +595,10 @@ export default function Home() {
     setSuggestedMedicines(prev => prev.filter(m => m !== med));
   };
 
-  const handlePrintPrescription = () => {
+  const handlePrintPrescription = async () => {
     if (!selectedToken) return;
 
-    const newVisitRecord: Visit = {
-      id: `VISIT-${Date.now()}`,
+    const newVisitRecord = {
       pid: selectedToken.pid,
       date: new Date().toLocaleDateString('en-GB'),
       time: selectedToken.time,
@@ -478,10 +606,33 @@ export default function Home() {
       diagnosis: prescription.Diagnosis || "Under Observation",
       medicines: prescription.medicines || "No medicines prescribed.",
       vitals: selectedToken.vitals,
-      tokenNumber: selectedToken.tokenNumber
+      token_number: selectedToken.tokenNumber
     };
 
-    setVisitsHistory(prev => [newVisitRecord, ...prev]);
+    // Database push or local fallback
+    if (supabase) {
+      try {
+        await supabase.from("visits").insert([newVisitRecord]);
+        await supabase.from("tokens").delete().eq("token_number", selectedToken.tokenNumber);
+        // DB triggers sync
+      } catch (err) {
+        console.error("Prescription save error:", err);
+      }
+    } else {
+      const localVisit: Visit = {
+        id: `VISIT-${Date.now()}`,
+        pid: selectedToken.pid,
+        date: newVisitRecord.date,
+        time: newVisitRecord.time,
+        complaints: newVisitRecord.complaints,
+        diagnosis: newVisitRecord.diagnosis,
+        medicines: newVisitRecord.medicines,
+        vitals: selectedToken.vitals,
+        tokenNumber: selectedToken.tokenNumber
+      };
+      setVisitsHistory(prev => [localVisit, ...prev]);
+      setTokenList(prev => prev.filter(p => p.tokenNumber !== selectedToken.tokenNumber));
+    }
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) return triggerAlert("⚠️ Please allow popups to print prescriptions");
@@ -570,7 +721,6 @@ export default function Home() {
     printWindow.document.write(prescriptionHTML);
     printWindow.document.close();
 
-    setTokenList(prev => prev.filter(p => p.tokenNumber !== selectedToken.tokenNumber));
     setSelectedToken(null);
     setPrescription({ complaints: "", Diagnosis: "", medicines: "" });
   };
@@ -579,7 +729,7 @@ export default function Home() {
     ? visitsHistory.filter(v => v.pid === selectedToken.pid) 
     : [];
 
-  const handleAddLabReport = (e: React.FormEvent) => {
+  const handleAddLabReport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reportPatientName || !selectedLabTest || !testResult) {
       return triggerAlert("⚠️ Please fill all Laboratory fields!");
@@ -588,17 +738,35 @@ export default function Home() {
     const testObject = labTestsCatalog.find(t => t.id === selectedLabTest);
     if (!testObject) return;
 
-    const newReport: LabReport = {
-      id: `LAB-REP-${Date.now()}`,
-      patientName: reportPatientName,
+    const newReport = {
+      patient_name: reportPatientName,
       pid: reportPid || "Walk-In",
-      testName: testObject.name,
-      resultValue: testResult,
+      test_name: testObject.name,
+      result_value: testResult,
       date: new Date().toLocaleDateString('en-GB'),
       status: "Verified",
     };
 
-    setLabReports(prev => [newReport, ...prev]);
+    if (supabase) {
+      try {
+        await supabase.from("lab_reports").insert([newReport]);
+        fetchDataFromSupabase();
+      } catch (err) {
+        console.error("Lab insert error:", err);
+      }
+    } else {
+      const localReport: LabReport = {
+        id: `LAB-REP-${Date.now()}`,
+        patientName: newReport.patient_name,
+        pid: newReport.pid,
+        testName: newReport.test_name,
+        resultValue: newReport.result_value,
+        date: newReport.date,
+        status: newReport.status
+      };
+      setLabReports(prev => [localReport, ...prev]);
+    }
+
     setReportPatientName("");
     setReportPid("");
     setTestResult("");
@@ -680,22 +848,39 @@ export default function Home() {
     printWindow.document.close();
   };
 
-  const handleAddMedicine = (e: React.FormEvent) => {
+  const handleAddMedicine = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMedName || !newMedWS || !newMedRT || !newMedQty) {
       return triggerAlert("⚠️ Please fill all medicine details!");
     }
 
-    const newMed: Medicine = {
-      id: `MED-${Date.now()}`,
+    const newMed = {
       name: newMedName,
-      wholesalePrice: parseFloat(newMedWS),
-      retailPrice: parseFloat(newMedRT),
+      wholesale_price: parseFloat(newMedWS),
+      retail_price: parseFloat(newMedRT),
       stock: parseInt(newMedQty, 10),
-      minStockAlert: parseInt(newMedAlert, 10)
+      min_stock_alert: parseInt(newMedAlert, 10)
     };
 
-    setMedicines(prev => [newMed, ...prev]);
+    if (supabase) {
+      try {
+        await supabase.from("medicines").insert([newMed]);
+        fetchDataFromSupabase();
+      } catch (err) {
+        console.error("Med insert error:", err);
+      }
+    } else {
+      const localMed: Medicine = {
+        id: `MED-${Date.now()}`,
+        name: newMed.name,
+        wholesalePrice: newMed.wholesale_price,
+        retailPrice: newMed.retail_price,
+        stock: newMed.stock,
+        minStockAlert: newMed.min_stock_alert
+      };
+      setMedicines(prev => [localMed, ...prev]);
+    }
+
     setNewMedName("");
     setNewMedWS("");
     setNewMedRT("");
@@ -703,17 +888,30 @@ export default function Home() {
     triggerAlert("📦 Medicine stock recorded successfully!");
   };
 
-  const handleUpdateStock = (id: string, amount: number) => {
-    setMedicines(prev => prev.map(m => {
-      if (m.id === id) {
-        return { ...m, stock: Math.max(0, m.stock + amount) };
+  const handleUpdateStock = async (id: string, amount: number) => {
+    if (supabase) {
+      try {
+        const item = medicines.find(m => m.id === id);
+        if (item) {
+          const updatedStock = Math.max(0, item.stock + amount);
+          await supabase.from("medicines").update({ stock: updatedStock }).eq("id", id);
+          fetchDataFromSupabase();
+        }
+      } catch (err) {
+        console.error("Stock adjust error:", err);
       }
-      return m;
-    }));
+    } else {
+      setMedicines(prev => prev.map(m => {
+        if (m.id === id) {
+          return { ...m, stock: Math.max(0, m.stock + amount) };
+        }
+        return m;
+      }));
+    }
     triggerAlert("🔄 Inventory stock level adjusted!");
   };
 
-  const handleAddInvoice = (e: React.FormEvent) => {
+  const handleAddInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!billingPatientName) return triggerAlert("⚠️ Please enter Patient Name!");
 
@@ -724,19 +922,38 @@ export default function Home() {
 
     const total = (opd + pharm + lab) - disc;
 
-    const newInvoice: Invoice = {
-      id: `INV-${Date.now()}`,
-      patientName: billingPatientName,
+    const newInvoice = {
+      patient_name: billingPatientName,
       pid: billingPid || "Walk-In",
-      opdFee: opd,
-      pharmacyTotal: pharm,
-      labTotal: lab,
+      opd_fee: opd,
+      pharmacy_total: pharm,
+      lab_total: lab,
       discount: disc,
-      grandTotal: total,
+      grand_total: total,
       date: new Date().toLocaleDateString('en-GB'),
     };
 
-    setBillingRecords(prev => [newInvoice, ...prev]);
+    if (supabase) {
+      try {
+        await supabase.from("billing_records").insert([newInvoice]);
+        fetchDataFromSupabase();
+      } catch (err) {
+        console.error("Billing insert error:", err);
+      }
+    } else {
+      const localInvoice: Invoice = {
+        id: `INV-${Date.now()}`,
+        patientName: newInvoice.patient_name,
+        pid: newInvoice.pid,
+        opdFee: newInvoice.opd_fee,
+        pharmacyTotal: newInvoice.pharmacy_total,
+        labTotal: newInvoice.lab_total,
+        discount: newInvoice.discount,
+        grandTotal: newInvoice.grand_total,
+        date: newInvoice.date
+      };
+      setBillingRecords(prev => [localInvoice, ...prev]);
+    }
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) return triggerAlert("⚠️ Please allow popups to print invoices");
@@ -763,9 +980,8 @@ export default function Home() {
 
           <div class="border-b">
             <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
-            <div><strong>Invoice ID:</strong> ${newInvoice.id}</div>
             <div><strong>Patient ID:</strong> ${newInvoice.pid}</div>
-            <div><strong>Patient:</strong> ${newInvoice.patientName}</div>
+            <div><strong>Patient:</strong> ${newInvoice.patient_name}</div>
           </div>
 
           <div class="border-b">
@@ -806,34 +1022,59 @@ export default function Home() {
     triggerAlert("💳 Invoice logged & printed successfully!");
   };
 
-  const handleAddExpense = (e: React.FormEvent) => {
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!expenseTitle || !expenseAmount) return triggerAlert("⚠️ Please enter Title and Amount!");
 
-    const newExpense: Expense = {
-      id: `EXP-${Date.now()}`,
+    const newExpense = {
       title: expenseTitle,
       amount: parseFloat(expenseAmount),
       category: expenseCategory,
       date: expenseDate,
     };
 
-    setExpenses(prev => [newExpense, ...prev]);
+    if (supabase) {
+      try {
+        await supabase.from("expenses").insert([newExpense]);
+        fetchDataFromSupabase();
+      } catch (err) {
+        console.error("Expense insert error:", err);
+      }
+    } else {
+      const localExpense: Expense = {
+        id: `EXP-${Date.now()}`,
+        title: newExpense.title,
+        amount: newExpense.amount,
+        category: newExpense.category,
+        date: newExpense.date
+      };
+      setExpenses(prev => [localExpense, ...prev]);
+    }
+
     setExpenseTitle("");
     setExpenseAmount("");
     triggerAlert("💸 Expense Logged Successfully!");
   };
 
-  const handleDeleteExpense = (id: string) => {
-    setExpenses(prev => prev.filter(exp => exp.id !== id));
+  const handleDeleteExpense = async (id: string) => {
+    if (supabase) {
+      try {
+        await supabase.from("expenses").delete().eq("id", id);
+        fetchDataFromSupabase();
+      } catch (err) {
+        console.error("Expense delete error:", err);
+      }
+    } else {
+      setExpenses(prev => prev.filter(exp => exp.id !== id));
+    }
     triggerAlert("🗑️ Expense Record Deleted!");
   };
 
-  const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
   const autoOPDRevenue = visitsHistory.length * (clinicConfig.doctor.consultationFee || 500);
   
-  const autoLabRevenue = billingRecords.reduce((sum, rec) => sum + (rec.labTotal || 0), 0);
-  const autoPharmRevenue = billingRecords.reduce((sum, rec) => sum + (rec.pharmacyTotal || 0), 0);
+  const autoLabRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.labTotal) || 0), 0);
+  const autoPharmRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.pharmacyTotal) || 0), 0);
   
   const totalRevenue = autoOPDRevenue + autoLabRevenue + autoPharmRevenue + manualRevenue;
   const netProfit = totalRevenue - totalExpenses;
@@ -891,21 +1132,29 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans">
-      {}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-black tracking-tight text-blue-600 flex items-center gap-2">
-                🏥 {clinicConfig.clinicName}
-              </h1>
-              {userRole === "doctor" ? (
-                <span className="bg-blue-100 text-blue-700 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Doctor Desk</span>
-              ) : (
-                <span className="bg-amber-100 text-amber-800 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Receptionist Desk</span>
-              )}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-black tracking-tight text-blue-600 flex items-center gap-2">
+                  🏥 {clinicConfig.clinicName}
+                </h1>
+                {userRole === "doctor" ? (
+                  <span className="bg-blue-100 text-blue-700 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Doctor Desk</span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-800 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Receptionist Desk</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">{clinicConfig.tagline}</p>
             </div>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">{clinicConfig.tagline}</p>
+            {/* Supabase Status Indicator */}
+            <div className="flex items-center gap-1.5 mt-1 sm:mt-0 sm:ml-4">
+              <span className={`w-2.5 h-2.5 rounded-full ${dbStatus === "connected" ? "bg-emerald-500 animate-pulse" : "bg-amber-500 animate-pulse"}`}></span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                {dbStatus === "connected" ? "Live Database Sync" : "Local Storage Backed"}
+              </span>
+            </div>
           </div>
           
           <nav className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
@@ -949,7 +1198,6 @@ export default function Home() {
         )}
 
         {/* --- DASHBOARD VIEW --- */}
-        {}
         {activeTab === "dashboard" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 sm:p-8 text-white shadow-lg border border-blue-700/50">
@@ -987,7 +1235,7 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block">OPD Patients Checked</span>
-                <h3 className="text-2xl font-black text-slate-950 mt-1">{visitsHistory.length} <span className="text-xs font-normal text-slate-400">Visits</span></h3>
+                <h3 className="text-2xl font-black text-slate-955 mt-1">{visitsHistory.length} <span className="text-xs font-normal text-slate-400">Visits</span></h3>
                 <p className="text-[10px] text-slate-400 mt-1">Total visits recorded dynamically</p>
               </div>
 
@@ -1039,7 +1287,6 @@ export default function Home() {
         )}
 
         {/* --- OPD VIEW --- */}
-        {}
         {activeTab === "opd" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
@@ -1181,7 +1428,6 @@ export default function Home() {
               </div>
             </div>
 
-            {}
             {selectedToken && userRole === "doctor" && (
               <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all">
                 <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
@@ -1330,7 +1576,6 @@ export default function Home() {
         )}
 
         {/* --- LAB DIAGNOSTICS VIEW --- */}
-        {}
         {activeTab === "lab" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1405,7 +1650,6 @@ export default function Home() {
         )}
 
         {/* --- PHARMACY VIEW --- */}
-        {}
         {activeTab === "pharmacy" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             {medicines.some(m => m.stock <= m.minStockAlert) && (
@@ -1468,8 +1712,8 @@ export default function Home() {
                       {medicines.map(m => (
                         <tr key={m.id} className="hover:bg-slate-50">
                           <td className="py-3 font-bold">{m.name}</td>
-                          <td className="text-right font-mono">{m.wholesalePrice} PKR</td>
-                          <td className="text-right font-mono text-emerald-600 font-bold">{m.retailPrice} PKR</td>
+                          <td className="text-right font-mono">{m.wholesalePrice || m.wholesale_price} PKR</td>
+                          <td className="text-right font-mono text-emerald-600 font-bold">{m.retailPrice || m.retail_price} PKR</td>
                           <td className={`text-center font-black font-mono ${m.stock <= m.minStockAlert ? "text-red-500" : "text-slate-900"}`}>{m.stock}</td>
                           <td className="text-center">
                             {m.stock <= m.minStockAlert ? (
@@ -1495,7 +1739,6 @@ export default function Home() {
         )}
 
         {/* --- BILLING VIEW --- */}
-        {}
         {activeTab === "billing" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1562,12 +1805,12 @@ export default function Home() {
                         {billingRecords.map(inv => (
                           <tr key={inv.id} className="hover:bg-slate-50">
                             <td className="py-3">{inv.date}</td>
-                            <td className="font-bold">{inv.patientName}</td>
+                            <td className="font-bold">{inv.patientName || inv.patient_name}</td>
                             <td><span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">{inv.pid}</span></td>
-                            <td className="text-right font-mono">{inv.opdFee} PKR</td>
-                            <td className="text-right font-mono">{inv.pharmacyTotal} PKR</td>
-                            <td className="text-right font-mono">{inv.labTotal} PKR</td>
-                            <td className="text-right font-black text-emerald-600 font-mono">{inv.grandTotal} PKR</td>
+                            <td className="text-right font-mono">{inv.opdFee || inv.opd_fee} PKR</td>
+                            <td className="text-right font-mono">{inv.pharmacyTotal || inv.pharmacy_total} PKR</td>
+                            <td className="text-right font-mono">{inv.labTotal || inv.lab_total} PKR</td>
+                            <td className="text-right font-black text-emerald-600 font-mono">{inv.grandTotal || inv.grand_total} PKR</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1580,7 +1823,6 @@ export default function Home() {
         )}
 
         {/* --- EXPENSES & LEDGER VIEW --- */}
-        {}
         {activeTab === "expense" && userRole === "doctor" && (
           <div className="space-y-8 animate-fadeIn">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1634,7 +1876,7 @@ export default function Home() {
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date</label>
-                      <input type="date" value={expenseDate} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                      <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                     </div>
                   </div>
 
@@ -1700,3 +1942,4 @@ export default function Home() {
     </div>
   );
 }
+
