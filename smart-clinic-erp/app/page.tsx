@@ -1612,7 +1612,7 @@ export default function App() {
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Patient Search Database</span>
-                  <input type="text" value={labSearchQuery} onChange={(e) => { labSearchQuery = e.target.value; setShowLabSearchResults(true); }} placeholder="Type patient name or PID" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
+                  <input type="text" value={labSearchQuery} onChange={(e) => { setLabSearchQuery(e.target.value); setShowLabSearchResults(true); }} placeholder="Type patient name or PID" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
                   {showLabSearchResults && filteredLabPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
                       {filteredLabPatients.map(p => (
@@ -1715,7 +1715,7 @@ export default function App() {
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Search Clinic Patient (optional)</span>
-                  <input type="text" value={billingSearchQuery} onChange={(e) => { billingSearchQuery = e.target.value; setShowBillingSearchResults(true); }} placeholder="Type Patient Name or PID..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" />
+                  <input type="text" value={billingSearchQuery} onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} placeholder="Type Patient Name or PID..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" />
                   {showBillingSearchResults && filteredBillingPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto shadow-sm">
                       {filteredBillingPatients.map(p => (
