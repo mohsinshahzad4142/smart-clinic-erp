@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { useState, useEffect, useRef } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-// Clinic Configuration
+// Premium Inline Clinic Branding Config
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
@@ -20,25 +20,45 @@ const clinicConfig = {
   }
 };
 
-// Supabase Hybrid Client Setup with Local Fallback
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-let supabase: SupabaseClient | null = null;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
+// Gracefully instantiate Supabase. If credentials are missing, system falls back to localStorage automatically.
+let supabase: any = null;
 if (supabaseUrl && supabaseAnonKey) {
-  supabase = createClient(supabaseUrl, supabaseAnonKey);
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  } catch (err) {
+    console.error("Failed to initialize Supabase client", err);
+  }
 }
 
 interface Patient {
+  id?: string;
   pid: string;
   name: string;
   age: string;
   gender: string;
   phone: string;
+  created_at?: string;
+}
+
+interface Token {
+  id?: string;
+  tokenNumber: number;
+  token_number?: number; // DB mapping
+  pid: string;
+  name: string;
+  age: string;
+  gender: string;
+  phone: string;
+  vitals: { bp: string; temp: string; weight: string };
+  time: string;
+  created_at?: string;
 }
 
 interface Visit {
-  id: string;
+  id?: string;
   pid: string;
   date: string;
   time: string;
@@ -46,1095 +66,1000 @@ interface Visit {
   diagnosis: string;
   medicines: string;
   vitals: { bp: string; temp: string; weight: string };
-  tokenNumber: number;
-}
-
-interface Token {
-  tokenNumber: number;
-  pid: string;
-  name: string;
-  age: string;
-  gender: string;
-  phone: string;
-  vitals: { bp: string; temp: string; weight: string };
-  time: string;
-}
-
-interface LabTest {
-  id: string;
-  name: string;
-  category: string;
-  price: number;
-  referenceRange: string;
-}
-
-interface LabReport {
-  id: string;
-  patientName?: string;
-  patient_name?: string;
-  pid: string;
-  testName?: string;
-  test_name?: string;
-  resultValue?: string;
-  result_value?: string;
-  date: string;
-  status: string;
+  tokenNumber?: number;
+  token_number?: number;
+  created_at?: string;
 }
 
 interface Medicine {
   id: string;
   name: string;
   wholesalePrice?: number;
-  wholesale_price?: number;
+  wholesale_price?: number; // DB mapping
   retailPrice?: number;
-  retail_price?: number;
+  retail_price?: number; // DB mapping
   stock: number;
   minStockAlert?: number;
-  min_stock_alert?: number;
+  min_stock_alert?: number; // DB mapping
+  created_at?: string;
 }
 
-interface Invoice {
-  id: string;
-  patientName?: string;
+interface LabReport {
+  id?: string;
   patient_name?: string;
+  patientName?: string;
   pid: string;
-  opdFee?: number;
-  opd_fee?: number;
-  pharmacyTotal?: number;
-  pharmacy_total?: number;
-  labTotal?: number;
-  lab_total?: number;
-  discount: number;
-  grandTotal?: number;
-  grand_total?: number;
+  test_name?: string;
+  testName?: string;
+  result_value?: string;
+  resultValue?: string;
   date: string;
+  status: string;
+  created_at?: string;
+}
+
+interface BillingRecord {
+  id?: string;
+  patient_name?: string;
+  patientName?: string;
+  pid: string;
+  opd_fee?: number;
+  opdFee?: number;
+  pharmacy_total?: number;
+  pharmacyTotal?: number;
+  lab_total?: number;
+  labTotal?: number;
+  discount: number;
+  grand_total?: number;
+  grandTotal?: number;
+  date: string;
+  created_at?: string;
 }
 
 interface Expense {
-  id: string;
+  id?: string;
   title: string;
   amount: number;
   category: string;
   date: string;
+  created_at?: string;
 }
 
-export default function Home() {
+export default function App() {
   const [mounted, setMounted] = useState(false);
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [alertMessage, setAlertMessage] = useState<string | null>(null);
-  const [dbStatus, setDbStatus] = useState<"connected" | "local">("local");
+  
+  // Security State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userRole, setUserRole] = useState<'Doctor' | 'Receptionist' | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
 
-  // --- ROLE MANAGEMENT STATES ---
-  const [userRole, setUserRole] = useState<"doctor" | "receptionist" | null>(null);
-  const [pinInput, setPinInput] = useState("");
-  const [loginError, setLoginError] = useState<string | null>(null);
+  // DB Sync Status Indicator
+  const [syncStatus, setSyncStatus] = useState<'live' | 'local'>('local');
 
-  // --- CORE DATA STATES ---
+  // Navigation controller
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'opd' | 'pharmacy' | 'lab' | 'billing' | 'expenses'>('dashboard');
+
+  // Unified Central DB States
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   const [visitsHistory, setVisitsHistory] = useState<Visit[]>([]);
-  const [tokenList, setTokenList] = useState<Token[]>([]);
+  const [tokenQueue, setTokenQueue] = useState<Token[]>([]);
+  const [medicinesStock, setMedicinesStock] = useState<Medicine[]>([]);
+  const [labRecords, setLabRecords] = useState<LabReport[]>([]);
+  const [billingRecords, setBillingRecords] = useState<BillingRecord[]>([]);
+  const [expensesLedger, setExpensesLedger] = useState<Expense[]>([]);
   const [tokenCounter, setTokenCounter] = useState(1);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  
-  // Pharmacy Stock State
-  const [medicines, setMedicines] = useState<Medicine[]>([
-    { id: "MED-1", name: "Tab Paracetamol 500mg", wholesalePrice: 1.5, retailPrice: 3, stock: 120, minStockAlert: 50 },
-    { id: "MED-2", name: "Syp Hydryll 120ml", wholesalePrice: 45, retailPrice: 65, stock: 15, minStockAlert: 20 },
-    { id: "MED-3", name: "Cap Amoxicillin 250mg", wholesalePrice: 8, retailPrice: 12, stock: 250, minStockAlert: 100 },
-  ]);
 
-  // Lab Tests Catalog State
-  const [labTestsCatalog, setLabTestsCatalog] = useState<LabTest[]>([
-    { id: "LAB-1", name: "Complete Blood Count (CBC)", category: "Hematology", price: 800, referenceRange: "Hb: 12-16 g/dL" },
-    { id: "LAB-2", name: "Blood Sugar Fasting (BSF)", category: "Biochemistry", price: 200, referenceRange: "70-110 mg/dL" },
-    { id: "LAB-3", name: "Lipid Profile", category: "Biochemistry", price: 1500, referenceRange: "Cholesterol < 200 mg/dL" },
-  ]);
+  // Notifications
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
-  const [labReports, setLabReports] = useState<LabReport[]>([]);
-  const [billingRecords, setBillingRecords] = useState<Invoice[]>([]);
-
-  // --- FORM INPUT STATES ---
-  const [patientName, setPatientName] = useState("");
-  const [patientAge, setPatientAge] = useState("");
-  const [patientGender, setPatientGender] = useState("Male");
-  const [patientPhone, setPatientPhone] = useState("");
-  const [patientVitals, setPatientVitals] = useState({ bp: "", temp: "", weight: "" });
-  const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Forms states
+  const [patientForm, setPatientForm] = useState({ name: '', age: '', gender: 'Male', phone: '' });
+  const [vitalsForm, setVitalsForm] = useState({ bp: '', temp: '', weight: '' });
+  const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
 
-  // Exam Desk Form
+  // Doctor checkup desk state
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
-  const [prescription, setPrescription] = useState({ complaints: "", Diagnosis: "", medicines: "" });
+  const [prescriptionForm, setPrescriptionForm] = useState({ complaints: '', diagnosis: '', medicines: '' });
 
-  // --- SMART SUGGESTIONS STATE ---
-  const [suggestedSymptoms, setSuggestedSymptoms] = useState<string[]>([
-    "Fever", "Dry Cough", "Runny Nose", "Sore Throat", "Body Aches", "Headache", "Diarrhea", "Shortness of Breath", "Stomach Pain"
+  // Custom prescriptive shortcuts
+  const [complaintsSuggestions, setComplaintsSuggestions] = useState<string[]>(["Fever", "Flu & Running Nose", "Dry Cough", "Body Ache", "High Blood Pressure", "Chest Tightness", "Diarrhea", "Stomach Pain"]);
+  const [diagnosisSuggestions, setDiagnosisSuggestions] = useState<string[]>(["Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Gastroenteritis", "Essential Hypertension", "Bronchitis", "Enteric Fever"]);
+  const [medicineTemplates, setMedicineTemplates] = useState<string[]>([
+    "Tab Paracetamol 500mg -- 1+1+1 (5 Days)",
+    "Syp Hydryll -- 2 tsp thrice daily (5 Days)",
+    "Cap Amoxicillin 500mg -- 1+0+1 (5 Days)",
+    "Tab Flagyl 400mg -- 1+1+1 (5 Days)",
+    "Tab Loprin 75mg -- 0+1+0 (Daily)"
   ]);
-  const [suggestedDiagnoses, setSuggestedDiagnoses] = useState<string[]>([
-    "Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Typhoid Fever", "Gastroenteritis", "Essential Hypertension", "Type 2 Diabetes Mellitus"
-  ]);
-  const [suggestedMedicines, setSuggestedMedicines] = useState<string[]>([
-    "Tab Paracetamol 500mg (1+1+1)", "Syp Hydryll 120ml (2 tsp x 3)", "Cap Amoxicillin 500mg (1+0+1)", "Tab Flagyl 400mg (1+1+1)", "Tab Ponstan 500mg (1+0+1)"
-  ]);
+  const [customTemplateInput, setCustomTemplateInput] = useState('');
 
-  const [newSymptomInput, setNewSymptomInput] = useState("");
-  const [newDiagnosisInput, setNewDiagnosisInput] = useState("");
-  const [newMedicineInput, setNewMedicineInput] = useState("");
+  // Pharmacy Stock Forms
+  const [medForm, setMedForm] = useState({ name: '', wholesalePrice: '', retailPrice: '', stock: '', minStockAlert: '20' });
 
-  // Expense Form
-  const [expenseTitle, setExpenseTitle] = useState("");
-  const [expenseAmount, setExpenseAmount] = useState("");
-  const [expenseCategory, setExpenseCategory] = useState("Tea & Refreshments");
-  const [expenseDate, setExpenseDate] = useState("");
-  const [manualRevenue, setManualRevenue] = useState<number>(0);
+  // Laboratory Registry Forms
+  const [labForm, setLabForm] = useState({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: '' });
+  const [labSearchQuery, setLabSearchQuery] = useState('');
+  const [showLabSearchResults, setShowLabSearchResults] = useState(false);
 
-  // Pharmacy Stock Form
-  const [newMedName, setNewMedName] = useState("");
-  const [newMedWS, setNewMedWS] = useState("");
-  const [newMedRT, setNewMedRT] = useState("");
-  const [newMedQty, setNewMedQty] = useState("");
-  const [newMedAlert, setNewMedAlert] = useState("20");
+  // Billing Engine Form & Checkout Cart
+  const [billingSearchQuery, setBillingSearchQuery] = useState('');
+  const [showBillingSearchResults, setShowBillingSearchResults] = useState(false);
+  const [billingPatient, setBillingPatient] = useState<Patient | null>(null);
+  const [billItems, setBillItems] = useState<{ id: string; name: string; price: number; type: 'OPD' | 'Pharmacy' | 'Lab'; qty: number; maxQty?: number }[]>([]);
+  const [billDiscount, setBillDiscount] = useState<number>(0);
+  const [selectedPharmacyProduct, setSelectedPharmacyProduct] = useState<string>('');
+  const [selectedLabTest, setSelectedLabTest] = useState<string>('Routine Urine Analysis');
+  const [customOpdFee, setCustomOpdFee] = useState<number>(clinicConfig.doctor.consultationFee);
 
-  // Lab Report Form
-  const [reportPatientName, setReportPatientName] = useState("");
-  const [reportPid, setReportPid] = useState("");
-  const [selectedLabTest, setSelectedLabTest] = useState("");
-  const [testResult, setTestResult] = useState("");
+  // Expenses Forms
+  const [expenseForm, setExpenseForm] = useState({ title: '', amount: '', category: 'Tea & Refreshments', date: '' });
 
-  // Billing Module Form
-  const [billingPid, setBillingPid] = useState("");
-  const [billingPatientName, setBillingPatientName] = useState("");
-  const [billingOPDFee, setBillingOPDFee] = useState(clinicConfig.doctor.consultationFee);
-  const [billingPharmTotal, setBillingPharmTotal] = useState("");
-  const [billingLabTotal, setBillingLabTotal] = useState("");
-  const [billingDiscount, setBillingDiscount] = useState("0");
-
-  // --- INITIAL DATA SYNC LOAD ---
   useEffect(() => {
     setMounted(true);
-    setExpenseDate(new Date().toISOString().split("T")[0]);
+    // Initialize date inputs
+    setExpenseForm(prev => ({ ...prev, date: new Date().toISOString().split("T")[0] }));
+    setLabForm(prev => ({ ...prev, date: new Date().toISOString().split("T")[0] }));
 
-    const activeSessionRole = localStorage.getItem("sc_active_role");
-    if (activeSessionRole === "doctor" || activeSessionRole === "receptionist") {
-      setUserRole(activeSessionRole);
+    // Check pre-saved session keys to bypass PIN on refresh
+    const savedRole = localStorage.getItem("sc_user_role");
+    if (savedRole === "Doctor" || savedRole === "Receptionist") {
+      setIsAuthenticated(true);
+      setUserRole(savedRole as any);
+      if (savedRole === "Receptionist") setActiveTab('opd');
     }
 
-    if (supabase) {
-      setDbStatus("connected");
-      fetchDataFromSupabase();
-      subscribeToRealtimeChanges();
-    } else {
-      setDbStatus("local");
-      loadLocalBackup();
-    }
+    // Load initial fallback datasets
+    loadLocalStoreFallbacks();
+
+    // Verify Cloud Engine Status
+    testCloudSyncEngine();
   }, []);
 
-  const loadLocalBackup = () => {
-    const loadData = (key: string, setter: Function) => {
-      try {
-        const stored = localStorage.getItem(key);
-        if (stored && stored.trim() !== "" && stored !== "undefined") {
-          setter(JSON.parse(stored));
-        }
-      } catch (err) {
-        console.warn(`Error parsing localStorage key "${key}":`, err);
-      }
-    };
-
-    loadData("sc_patients", setPatientsList);
-    loadData("sc_visits", setVisitsHistory);
-    loadData("sc_tokens", setTokenList);
-    loadData("sc_expenses", setExpenses);
-    loadData("sc_medicines", setMedicines);
-    loadData("sc_lab_reports", setLabReports);
-    loadData("sc_billing_records", setBillingRecords);
-
-    // Templates
-    loadData("sc_suggested_symptoms", setSuggestedSymptoms);
-    loadData("sc_suggested_diagnoses", setSuggestedDiagnoses);
-    loadData("sc_suggested_medicines", setSuggestedMedicines);
-
-    const storedCounter = localStorage.getItem("sc_token_counter");
-    if (storedCounter) setTokenCounter(parseInt(storedCounter, 10) || 1);
-
-    const storedManualRev = localStorage.getItem("sc_manual_rev");
-    if (storedManualRev) setManualRevenue(Number(storedManualRev) || 0);
+  const triggerNotification = (msg: string) => {
+    setAlertMessage(msg);
+    setTimeout(() => setAlertMessage(null), 4000);
   };
 
-  // Fetch Database tables on boot
-  const fetchDataFromSupabase = async () => {
+  const loadLocalStoreFallbacks = () => {
+    const rawPatients = localStorage.getItem("sc_patients");
+    const rawVisits = localStorage.getItem("sc_visits");
+    const rawTokens = localStorage.getItem("sc_tokens");
+    const rawCounter = localStorage.getItem("sc_token_counter");
+    const rawMeds = localStorage.getItem("sc_medicines");
+    const rawLab = localStorage.getItem("sc_lab_reports");
+    const rawBills = localStorage.getItem("sc_bills");
+    const rawExpenses = localStorage.getItem("sc_expenses");
+    const rawCustomSugg = localStorage.getItem("sc_custom_templates");
+
+    if (rawPatients) setPatientsList(JSON.parse(rawPatients));
+    if (rawVisits) setVisitsHistory(JSON.parse(rawVisits));
+    if (rawTokens) setTokenQueue(JSON.parse(rawTokens));
+    if (rawCounter) setTokenCounter(parseInt(rawCounter, 10));
+    if (rawMeds) setMedicinesStock(JSON.parse(rawMeds));
+    if (rawLab) setLabRecords(JSON.parse(rawLab));
+    if (rawBills) setBillingRecords(JSON.parse(rawBills));
+    if (rawExpenses) setExpensesLedger(JSON.parse(rawExpenses));
+    if (rawCustomSugg) setMedicineTemplates(JSON.parse(rawCustomSugg));
+  };
+
+  const testCloudSyncEngine = async () => {
+    if (!supabase) {
+      setSyncStatus('local');
+      return;
+    }
+    try {
+      // Perform diagnostic checks against Patients ledger
+      const { data, error } = await supabase.from('patients').select('id').limit(1);
+      if (error) throw error;
+      setSyncStatus('live');
+      syncCloudDataToLocal();
+    } catch (err) {
+      console.warn("Cloud connection diagnostics failed. Running locally.", err);
+      setSyncStatus('local');
+    }
+  };
+
+  const syncCloudDataToLocal = async () => {
     if (!supabase) return;
     try {
-      const { data: pList } = await supabase.from("patients").select("*").order("created_at", { ascending: false });
-      if (pList) setPatientsList(pList);
+      const { data: pt } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
+      const { data: tk } = await supabase.from('tokens').select('*').order('created_at', { ascending: false });
+      const { data: vt } = await supabase.from('visits').select('*').order('created_at', { ascending: false });
+      const { data: md } = await supabase.from('medicines').select('*').order('created_at', { ascending: false });
+      const { data: lb } = await supabase.from('lab_reports').select('*').order('created_at', { ascending: false });
+      const { data: bl } = await supabase.from('billing_records').select('*').order('created_at', { ascending: false });
+      const { data: ex } = await supabase.from('expenses').select('*').order('created_at', { ascending: false });
 
-      const { data: tList } = await supabase.from("tokens").select("*").order("token_number", { ascending: true });
-      if (tList) {
-        setTokenList(tList);
-        // Set token counter dynamically to avoid duplicate token numbers
-        const maxToken = tList.reduce((max, t) => t.token_number > max ? t.token_number : max, 0);
-        setTokenCounter(maxToken + 1);
+      if (pt) { setPatientsList(pt); localStorage.setItem("sc_patients", JSON.stringify(pt)); }
+      if (tk) {
+        // Map raw DB snake_case formats to model structures safely
+        const formattedTokens: Token[] = tk.map((t: any) => ({
+          id: t.id,
+          tokenNumber: t.token_number ?? t.tokenNumber,
+          pid: t.pid,
+          name: t.name,
+          age: t.age,
+          gender: t.gender,
+          phone: t.phone || '',
+          vitals: typeof t.vitals === 'string' ? JSON.parse(t.vitals) : (t.vitals || { bp: '', temp: '', weight: '' }),
+          time: t.time
+        }));
+        setTokenQueue(formattedTokens);
+        localStorage.setItem("sc_tokens", JSON.stringify(formattedTokens));
+        
+        if (formattedTokens.length > 0) {
+          const maxT = Math.max(...formattedTokens.map(f => f.tokenNumber));
+          setTokenCounter(maxT + 1);
+        }
       }
-
-      const { data: vList } = await supabase.from("visits").select("*").order("created_at", { ascending: false });
-      if (vList) setVisitsHistory(vList);
-
-      const { data: eList } = await supabase.from("expenses").select("*").order("created_at", { ascending: false });
-      if (eList) setExpenses(eList);
-
-      const { data: mList } = await supabase.from("medicines").select("*").order("created_at", { ascending: false });
-      if (mList && mList.length > 0) setMedicines(mList);
-
-      const { data: lList } = await supabase.from("lab_reports").select("*").order("created_at", { ascending: false });
-      if (lList) setLabReports(lList);
-
-      const { data: bList } = await supabase.from("billing_records").select("*").order("created_at", { ascending: false });
-      if (bList) setBillingRecords(bList);
-    } catch (e) {
-      console.warn("Supabase connection error. Running locally.", e);
-      setDbStatus("local");
-      loadLocalBackup();
+      if (vt) { setVisitsHistory(vt); localStorage.setItem("sc_visits", JSON.stringify(vt)); }
+      if (md) { setMedicinesStock(md); localStorage.setItem("sc_medicines", JSON.stringify(md)); }
+      if (lb) { setLabRecords(lb); localStorage.setItem("sc_lab_reports", JSON.stringify(lb)); }
+      if (bl) { setBillingRecords(bl); localStorage.setItem("sc_bills", JSON.stringify(bl)); }
+      if (ex) { setExpensesLedger(ex); localStorage.setItem("sc_expenses", JSON.stringify(ex)); }
+    } catch (err) {
+      console.error("Failed to fetch tables from Supabase Cloud", err);
     }
   };
 
-  // Live Subscription for Instant Doctor-Receptionist Sync
-  const subscribeToRealtimeChanges = () => {
-    if (!supabase) return;
+  useEffect(() => {
+    if (!supabase || syncStatus !== 'live') return;
 
-    supabase
-      .channel("realtime-clinic")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tokens" }, () => {
-        fetchDataFromSupabase();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "patients" }, () => {
-        fetchDataFromSupabase();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "visits" }, () => {
-        fetchDataFromSupabase();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
-        fetchDataFromSupabase();
+    // Realtime Token channel listener setup
+    const tokenSubscription = supabase
+      .channel('realtime_tokens_channel')
+      .on('postgres_changes', { event: '*', scheme: 'public', table: 'tokens' }, () => {
+        syncCloudDataToLocal();
       })
       .subscribe();
-  };
 
-  // --- LOCAL PERSISTENCE BACKUPS (Runs in background) ---
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_patients", JSON.stringify(patientsList));
-  }, [patientsList, mounted, dbStatus]);
+    const billingSubscription = supabase
+      .channel('realtime_billing_channel')
+      .on('postgres_changes', { event: '*', scheme: 'public', table: 'billing_records' }, () => {
+        syncCloudDataToLocal();
+      })
+      .subscribe();
 
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_visits", JSON.stringify(visitsHistory));
-  }, [visitsHistory, mounted, dbStatus]);
+    const stockSubscription = supabase
+      .channel('realtime_stock_channel')
+      .on('postgres_changes', { event: '*', scheme: 'public', table: 'medicines' }, () => {
+        syncCloudDataToLocal();
+      })
+      .subscribe();
 
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_tokens", JSON.stringify(tokenList));
-  }, [tokenList, mounted, dbStatus]);
+    return () => {
+      supabase.removeChannel(tokenSubscription);
+      supabase.removeChannel(billingSubscription);
+      supabase.removeChannel(stockSubscription);
+    };
+  }, [syncStatus]);
 
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_token_counter", tokenCounter.toString());
-  }, [tokenCounter, mounted, dbStatus]);
-
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_expenses", JSON.stringify(expenses));
-  }, [expenses, mounted, dbStatus]);
-
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_medicines", JSON.stringify(medicines));
-  }, [medicines, mounted, dbStatus]);
-
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_lab_reports", JSON.stringify(labReports));
-  }, [labReports, mounted, dbStatus]);
-
-  useEffect(() => {
-    if (!mounted || dbStatus === "connected") return;
-    localStorage.setItem("sc_billing_records", JSON.stringify(billingRecords));
-  }, [billingRecords, mounted, dbStatus]);
-
+  // Handle local changes preservation
   useEffect(() => {
     if (!mounted) return;
-    localStorage.setItem("sc_manual_rev", manualRevenue.toString());
-  }, [manualRevenue, mounted]);
+    localStorage.setItem("sc_custom_templates", JSON.stringify(medicineTemplates));
+  }, [medicineTemplates, mounted]);
 
-  // Persist templates globally
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem("sc_suggested_symptoms", JSON.stringify(suggestedSymptoms));
-  }, [suggestedSymptoms, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem("sc_suggested_diagnoses", JSON.stringify(suggestedDiagnoses));
-  }, [suggestedDiagnoses, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem("sc_suggested_medicines", JSON.stringify(suggestedMedicines));
-  }, [suggestedMedicines, mounted]);
-
-  if (!mounted) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="text-sm font-bold text-slate-500">🏥 Loading Smart Clinic ERP Systems...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const triggerAlert = (msg: string) => {
-    setAlertMessage(msg);
-    setTimeout(() => setAlertMessage(null), 3500);
-  };
-
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleSecurityPinLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    setLoginError(null);
+    setPinError('');
 
     if (pinInput === "4142") {
-      setUserRole("doctor");
-      localStorage.setItem("sc_active_role", "doctor");
-      triggerAlert("🔓 Welcome Doctor Mohsin Shahzad!");
+      setIsAuthenticated(true);
+      setUserRole('Doctor');
+      localStorage.setItem("sc_user_role", "Doctor");
+      setActiveTab('dashboard');
+      triggerNotification("👨‍⚕️ Welcome Doctor Mohsin Shahzad!");
     } else if (pinInput === "1122") {
-      setUserRole("receptionist");
-      localStorage.setItem("sc_active_role", "receptionist");
-      setActiveTab("opd"); 
-      triggerAlert("🔓 Receptionist Desk Authenticated!");
+      setIsAuthenticated(true);
+      setUserRole('Receptionist');
+      localStorage.setItem("sc_user_role", "Receptionist");
+      setActiveTab('opd');
+      triggerNotification("📝 Welcome Receptionist Desk!");
     } else {
-      setLoginError("❌ Incorrect PIN code! Please try again.");
+      setPinError("Invalid Verification Pin! Access Denied.");
+      setPinInput('');
     }
-    setPinInput("");
   };
 
   const handleLogout = () => {
+    setIsAuthenticated(false);
     setUserRole(null);
-    localStorage.removeItem("sc_active_role");
-    setSelectedToken(null);
-    triggerAlert("🔒 Logged out successfully!");
+    localStorage.removeItem("sc_user_role");
+    setPinInput('');
   };
 
-  const filteredPatients = searchQuery.trim() === "" 
-    ? [] 
-    : patientsList.filter(p => 
+  const filteredPatients = searchQuery.trim() === ""
+    ? []
+    : patientsList.filter(p =>
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.pid.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.phone.includes(searchQuery)
       );
 
-  const handleSelectReturning = (patient: Patient) => {
-    setPatientName(patient.name);
-    setPatientAge(patient.age);
-    setPatientGender(patient.gender);
-    setPatientPhone(patient.phone);
-    setSelectedExistingPid(patient.pid);
-    setSearchQuery("");
+  const handleSelectReturningPatient = (p: Patient) => {
+    setPatientForm({ name: p.name, age: p.age, gender: p.gender, phone: p.phone });
+    setSelectedExistingPid(p.pid);
+    setSearchQuery('');
     setShowSearchResults(false);
-    triggerAlert(`Existing Patient Selected: ${patient.name} (${patient.pid})`);
+    triggerNotification(`Auto-Filled Profile for: ${p.name} (${p.pid})`);
   };
 
-  const handlePatientSubmit = async (e: React.FormEvent) => {
+  const handleRegisterTokenSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patientName || !patientAge) return triggerAlert("⚠️ Please enter Patient Name and Age!");
+    if (!patientForm.name || !patientForm.age) {
+      return triggerNotification("⚠️ Patient Name and Age are required fields!");
+    }
 
     let finalPid = selectedExistingPid;
 
-    // A. Generate/Save Patient Profile
+    // A. Generate and preserve patient profile if they are brand new
     if (!finalPid) {
-      if (supabase) {
+      const generatedNumber = 1001 + patientsList.length;
+      finalPid = `PID-${generatedNumber}`;
+      const newPatient: Patient = {
+        pid: finalPid,
+        name: patientForm.name,
+        age: patientForm.age,
+        gender: patientForm.gender,
+        phone: patientForm.phone
+      };
+
+      if (syncStatus === 'live' && supabase) {
         try {
-          const { data, error } = await supabase
-            .from("patients")
-            .insert([{ name: patientName, age: patientAge, gender: patientGender, phone: patientPhone }])
-            .select()
-            .single();
-          if (error) throw error;
-          if (data) {
-            finalPid = data.pid;
-            setPatientsList(prev => [data, ...prev]);
-          }
+          await supabase.from('patients').insert([newPatient]);
         } catch (err) {
-          console.error("Supabase patient insert error:", err);
-          return triggerAlert("❌ Database error during patient saving!");
+          console.error("Cloud insert patient failed", err);
         }
-      } else {
-        const generatedNumber = 1001 + patientsList.length;
-        finalPid = `PID-${generatedNumber}`;
-        const newPatientRecord: Patient = {
-          pid: finalPid,
-          name: patientName,
-          age: patientAge,
-          gender: patientGender,
-          phone: patientPhone
-        };
-        setPatientsList(prev => [newPatientRecord, ...prev]);
       }
+      setPatientsList(prev => [newPatient, ...prev]);
+      const currentLocalPatients = JSON.parse(localStorage.getItem("sc_patients") || "[]");
+      localStorage.setItem("sc_patients", JSON.stringify([newPatient, ...currentLocalPatients]));
     }
 
-    // B. Issue Token Queue Instance
-    const newToken = {
-      token_number: tokenCounter,
+    // B. Queue up the active token
+    const newToken: Token = {
+      tokenNumber,
       pid: finalPid,
-      name: patientName,
-      age: patientAge,
-      gender: patientGender,
-      phone: patientPhone,
-      vitals: patientVitals,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      name: patientForm.name,
+      age: patientForm.age,
+      gender: patientForm.gender,
+      phone: patientForm.phone,
+      vitals: vitalsForm,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    if (supabase) {
+    if (syncStatus === 'live' && supabase) {
       try {
-        const { error } = await supabase.from("tokens").insert([newToken]);
-        if (error) throw error;
-        // Realtime listener triggers local update
+        await supabase.from('tokens').insert([{
+          token_number: newToken.tokenNumber,
+          pid: newToken.pid,
+          name: newToken.name,
+          age: newToken.age,
+          gender: newToken.gender,
+          phone: newToken.phone,
+          vitals: JSON.stringify(newToken.vitals),
+          time: newToken.time
+        }]);
       } catch (err) {
-        console.error("Supabase token insert error:", err);
-        return triggerAlert("❌ Database error during token queueing!");
+        console.error("Cloud insert token failed", err);
       }
-    } else {
-      // Local Fallback Queue state update
-      const localToken: Token = {
-        tokenNumber: tokenCounter,
-        pid: finalPid || "N/A",
-        name: patientName,
-        age: patientAge,
-        gender: patientGender,
-        phone: patientPhone,
-        vitals: patientVitals,
-        time: newToken.time,
-      };
-      setTokenList(prev => [...prev, localToken]);
-      setTokenCounter(prev => prev + 1);
     }
 
-    setPatientName("");
-    setPatientAge("");
-    setPatientPhone("");
-    setPatientVitals({ bp: "", temp: "", weight: "" });
+    setTokenQueue(prev => [...prev, newToken]);
+    const currentLocalTokens = JSON.parse(localStorage.getItem("sc_tokens") || "[]");
+    localStorage.setItem("sc_tokens", JSON.stringify([...currentLocalTokens, newToken]));
+
+    const nextCounter = tokenCounter + 1;
+    setTokenCounter(nextCounter);
+    localStorage.setItem("sc_token_counter", nextCounter.toString());
+
+    // Flush fields
+    setPatientForm({ name: '', age: '', gender: 'Male', phone: '' });
+    setVitalsForm({ bp: '', temp: '', weight: '' });
     setSelectedExistingPid(null);
-    triggerAlert(`🎟️ Token Issued Successfully for PID: ${finalPid}`);
+    triggerNotification(`🎟️ Issued Token #${tokenNumber} for PID: ${finalPid}`);
   };
 
-  const handleCheckPatient = (token: Token) => {
-    if (userRole !== "doctor") {
-      return triggerAlert("🔒 Access Denied: Only Doctor can examine patients!");
-    }
+  const handleOpenExaminationDesk = (token: Token) => {
     setSelectedToken(token);
-    setPrescription({ complaints: "", Diagnosis: "", medicines: "" });
+    setPrescriptionForm({ complaints: '', diagnosis: '', medicines: '' });
   };
 
-  const handleCloneVisit = (pastVisit: Visit) => {
-    setPrescription({
-      complaints: pastVisit.complaints,
-      Diagnosis: pastVisit.diagnosis,
-      medicines: pastVisit.medicines
-    });
-    triggerAlert("📋 Past Prescription Copied to Current Desk!");
-  };
-
-  const appendSymptom = (sym: string) => {
-    setPrescription(prev => {
-      const current = prev.complaints.trim();
-      const updated = current ? `${current}, ${sym}` : sym;
+  const handleAddSymptomShortcut = (symptom: string) => {
+    setPrescriptionForm(prev => {
+      const existing = prev.complaints.trim();
+      const updated = existing ? `${existing}, ${symptom}` : symptom;
       return { ...prev, complaints: updated };
     });
   };
 
-  const appendDiagnosis = (diag: string) => {
-    setPrescription(prev => {
-      const current = prev.Diagnosis.trim();
-      const updated = current ? `${current}, ${diag}` : diag;
-      return { ...prev, Diagnosis: updated };
-    });
+  const handleAddDiagnosisShortcut = (diagnosis: string) => {
+    setPrescriptionForm(prev => ({ ...prev, diagnosis }));
   };
 
-  const appendMedicine = (med: string) => {
-    setPrescription(prev => {
-      const current = prev.medicines.trim();
-      const lines = current ? current.split('\n').filter(l => l.trim() !== '') : [];
-      const nextIndex = lines.length + 1;
-      const cleanMed = med.replace(/^\d+\.\s*/, ''); // Remove numbering if already exists
-      const formattedMed = `${nextIndex}. ${cleanMed}`;
-      const updated = current ? `${current}\n${formattedMed}` : formattedMed;
+  const handleAddMedicineShortcut = (med: string) => {
+    setPrescriptionForm(prev => {
+      const lines = prev.medicines.trim() ? prev.medicines.split('\n') : [];
+      const nextNum = lines.length + 1;
+      const cleanMed = med.replace(/^\d+\.\s*/, ''); // strip leading numbers if exist
+      const lineToAdd = `${nextNum}. ${cleanMed}`;
+      const updated = prev.medicines.trim() ? `${prev.medicines}\n${lineToAdd}` : lineToAdd;
       return { ...prev, medicines: updated };
     });
   };
 
-  const addNewSymptomTemplate = () => {
-    if (!newSymptomInput.trim()) return;
-    if (suggestedSymptoms.includes(newSymptomInput.trim())) return;
-    setSuggestedSymptoms(prev => [...prev, newSymptomInput.trim()]);
-    setNewSymptomInput("");
-    triggerAlert("✨ New Symptom template added!");
+  const handleSaveCustomMedicineTemplate = () => {
+    if (!customTemplateInput.trim()) return;
+    setMedicineTemplates(prev => [...prev, customTemplateInput.trim()]);
+    setCustomTemplateInput('');
+    triggerNotification("💾 Custom Prescription Template Saved!");
   };
 
-  const addNewDiagnosisTemplate = () => {
-    if (!newDiagnosisInput.trim()) return;
-    if (suggestedDiagnoses.includes(newDiagnosisInput.trim())) return;
-    setSuggestedDiagnoses(prev => [...prev, newDiagnosisInput.trim()]);
-    setNewDiagnosisInput("");
-    triggerAlert("✨ New Diagnosis template added!");
+  const handleDeleteCustomMedicineTemplate = (index: number) => {
+    setMedicineTemplates(prev => prev.filter((_, i) => i !== index));
+    triggerNotification("🗑️ Prescription Template Removed.");
   };
 
-  const addNewMedicineTemplate = () => {
-    if (!newMedicineInput.trim()) return;
-    if (suggestedMedicines.includes(newMedicineInput.trim())) return;
-    setSuggestedMedicines(prev => [...prev, newMedicineInput.trim()]);
-    setNewMedicineInput("");
-    triggerAlert("✨ New Medicine template added!");
+  const handleCloneVisitRx = (pastVisit: Visit) => {
+    setPrescriptionForm({
+      complaints: pastVisit.complaints,
+      diagnosis: pastVisit.diagnosis,
+      medicines: pastVisit.medicines
+    });
+    triggerNotification("📋 Copied past checkup details to current desk!");
   };
 
-  const deleteSymptomTemplate = (sym: string) => {
-    setSuggestedSymptoms(prev => prev.filter(s => s !== sym));
-  };
-
-  const deleteDiagnosisTemplate = (diag: string) => {
-    setSuggestedDiagnoses(prev => prev.filter(d => d !== diag));
-  };
-
-  const deleteMedicineTemplate = (med: string) => {
-    setSuggestedMedicines(prev => prev.filter(m => m !== med));
-  };
-
-  const handlePrintPrescription = async () => {
+  const handleCheckoutAndPrintPrescription = async () => {
     if (!selectedToken) return;
 
-    const newVisitRecord = {
+    const formattedVisit: Visit = {
       pid: selectedToken.pid,
       date: new Date().toLocaleDateString('en-GB'),
       time: selectedToken.time,
-      complaints: prescription.complaints || "Routine Checkup",
-      diagnosis: prescription.Diagnosis || "Under Observation",
-      medicines: prescription.medicines || "No medicines prescribed.",
+      complaints: prescriptionForm.complaints || "Routine Checkup",
+      diagnosis: prescriptionForm.diagnosis || "Under Observation",
+      medicines: prescriptionForm.medicines || "No medicines prescribed",
       vitals: selectedToken.vitals,
-      token_number: selectedToken.tokenNumber
+      tokenNumber: selectedToken.tokenNumber
     };
 
-    // Database push or local fallback
-    if (supabase) {
+    // A. Commit visit checkup record to databases
+    if (syncStatus === 'live' && supabase) {
       try {
-        await supabase.from("visits").insert([newVisitRecord]);
-        await supabase.from("tokens").delete().eq("token_number", selectedToken.tokenNumber);
-        // DB triggers sync
+        await supabase.from('visits').insert([{
+          pid: formattedVisit.pid,
+          date: formattedVisit.date,
+          time: formattedVisit.time,
+          complaints: formattedVisit.complaints,
+          diagnosis: formattedVisit.diagnosis,
+          medicines: formattedVisit.medicines,
+          vitals: JSON.stringify(formattedVisit.vitals),
+          token_number: formattedVisit.tokenNumber
+        }]);
+
+        // Evict token from active cloud pool
+        await supabase.from('tokens').delete().eq('pid', selectedToken.pid).eq('token_number', selectedToken.tokenNumber);
       } catch (err) {
-        console.error("Prescription save error:", err);
+        console.error("Cloud saving visit failed", err);
       }
-    } else {
-      const localVisit: Visit = {
-        id: `VISIT-${Date.now()}`,
-        pid: selectedToken.pid,
-        date: newVisitRecord.date,
-        time: newVisitRecord.time,
-        complaints: newVisitRecord.complaints,
-        diagnosis: newVisitRecord.diagnosis,
-        medicines: newVisitRecord.medicines,
-        vitals: selectedToken.vitals,
-        tokenNumber: selectedToken.tokenNumber
-      };
-      setVisitsHistory(prev => [localVisit, ...prev]);
-      setTokenList(prev => prev.filter(p => p.tokenNumber !== selectedToken.tokenNumber));
     }
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return triggerAlert("⚠️ Please allow popups to print prescriptions");
+    setVisitsHistory(prev => [formattedVisit, ...prev]);
+    const currentLocalVisits = JSON.parse(localStorage.getItem("sc_visits") || "[]");
+    localStorage.setItem("sc_visits", JSON.stringify([formattedVisit, ...currentLocalVisits]));
+
+    setTokenQueue(prev => prev.filter(t => t.pid !== selectedToken.pid));
+    const currentLocalTokens = JSON.parse(localStorage.getItem("sc_tokens") || "[]");
+    localStorage.setItem("sc_tokens", JSON.stringify(currentLocalTokens.filter((t: any) => t.pid !== selectedToken.pid)));
+
+    // B. Build and dispatch print container window
+    const win = window.open('', '_blank');
+    if (!win) {
+      return triggerNotification("⚠️ Please allow popups for prescription printing");
+    }
 
     const prescriptionHTML = `
       <html>
         <head>
           <title>Prescription - ${selectedToken.name}</title>
           <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #334155; padding: 40px; line-height: 1.6; }
-            .header { text-align: center; border-bottom: 3px double #2563eb; padding-bottom: 15px; margin-bottom: 30px; }
-            .clinic-name { font-size: 28px; font-weight: bold; color: #2563eb; margin: 0; }
-            .clinic-tagline { font-size: 14px; color: #64748b; font-style: italic; margin: 5px 0 0 0; }
-            .doctor-info { margin-top: 10px; font-size: 14px; color: #1e293b; }
-            .patient-bar { display: grid; grid-template-columns: 1fr 1fr 1fr; background: #f8fafc; padding: 12px 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 35px; font-size: 14px; gap: 10px; }
-            .patient-bar strong { color: #0f172a; }
-            .content-grid { display: grid; grid-template-columns: 1fr; gap: 25px; }
-            .section-title { font-size: 15px; font-weight: bold; text-transform: uppercase; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin-bottom: 10px; }
-            .rx-symbol { font-size: 24px; font-weight: bold; color: #2563eb; font-family: 'Times New Roman', serif; margin-bottom: 10px; }
-            .medicines-text { font-family: monospace; font-size: 15px; white-space: pre-wrap; padding-left: 10px; color: #0f172a; }
-            .footer { position: fixed; bottom: 30px; left: 40px; right: 40px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 12px; color: #94a3b8; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, sans-serif; color: #1e293b; padding: 30px; line-height: 1.5; }
+            .header { text-align: center; border-bottom: 3px double #2563eb; padding-bottom: 12px; margin-bottom: 25px; }
+            .clinic-name { font-size: 26px; font-weight: 800; color: #2563eb; margin: 0; }
+            .tagline { font-size: 13px; color: #64748b; font-style: italic; margin: 3px 0; }
+            .doc-info { font-size: 14px; margin-top: 5px; }
+            .patient-box { display: grid; grid-template-columns: 1fr 1fr; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 30px; font-size: 13px; gap: 8px; }
+            .sec-title { font-size: 14px; font-weight: bold; text-transform: uppercase; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin: 20px 0 8px 0; }
+            .vitals-row { display: flex; gap: 15px; font-size: 12px; color: #475569; }
+            .rx-symbol { font-size: 24px; font-weight: bold; color: #2563eb; font-family: serif; margin: 15px 0 5px 0; }
+            .med-list { font-family: monospace; font-size: 14px; white-space: pre-wrap; padding-left: 10px; }
+            .footer { position: fixed; bottom: 20px; left: 30px; right: 30px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; font-size: 11px; color: #94a3b8; }
           </style>
         </head>
         <body>
           <div class="header">
             <div class="clinic-name">🏥 ${clinicConfig.clinicName}</div>
-            <div class="clinic-tagline">${clinicConfig.tagline}</div>
-            <div class="doctor-info">
+            <div class="tagline">${clinicConfig.tagline}</div>
+            <div class="doc-info">
               <strong>${clinicConfig.doctor.name}</strong> • ${clinicConfig.doctor.degree}<br>
-              <span style="color: #2563eb; font-weight: 500;">${clinicConfig.doctor.specialty}</span>
+              <span style="color: #2563eb; font-weight: 600;">${clinicConfig.doctor.specialty}</span>
             </div>
           </div>
-
-          <div class="patient-bar">
+          <div class="patient-box">
             <div><strong>Patient ID:</strong> ${selectedToken.pid}</div>
-            <div><strong>Patient:</strong> ${selectedToken.name}</div>
+            <div><strong>Patient Name:</strong> ${selectedToken.name}</div>
             <div><strong>Age/Gender:</strong> ${selectedToken.age} Yrs / ${selectedToken.gender}</div>
-            <div><strong>Phone:</strong> ${selectedToken.phone || "N/A"}</div>
-            <div><strong>Token:</strong> #${selectedToken.tokenNumber}</div>
-            <div><strong>Date/Time:</strong> ${new Date().toLocaleDateString('en-GB')} ${selectedToken.time}</div>
+            <div><strong>Phone:</strong> ${selectedToken.phone || 'N/A'}</div>
+            <div><strong>Token No:</strong> #${selectedToken.tokenNumber}</div>
+            <div><strong>Checked Date:</strong> ${formattedVisit.date} ${formattedVisit.time}</div>
           </div>
-
-          <div class="content-grid">
-            ${selectedToken.vitals.bp || selectedToken.vitals.temp || selectedToken.vitals.weight ? `
-              <div>
-                <div class="section-title">Vitals</div>
-                <div style="font-size: 13px; display: flex; gap: 20px;">
-                  ${selectedToken.vitals.bp ? `<span><strong>BP:</strong> ${selectedToken.vitals.bp}</span>` : ""}
-                  ${selectedToken.vitals.temp ? `<span><strong>Temp:</strong> ${selectedToken.vitals.temp}</span>` : ""}
-                  ${selectedToken.vitals.weight ? `<span><strong>Weight:</strong> ${selectedToken.vitals.weight}kg</span>` : ""}
-                </div>
+          ${selectedToken.vitals.bp || selectedToken.vitals.temp || selectedToken.vitals.weight ? `
+            <div>
+              <div class="sec-title">Patient Vitals</div>
+              <div class="vitals-row">
+                ${selectedToken.vitals.bp ? `<span><strong>Blood Pressure:</strong> ${selectedToken.vitals.bp}</span>` : ''}
+                ${selectedToken.vitals.temp ? `<span><strong>Temperature:</strong> ${selectedToken.vitals.temp}</span>` : ''}
+                ${selectedToken.vitals.weight ? `<span><strong>Weight:</strong> ${selectedToken.vitals.weight} kg</span>` : ''}
               </div>
-            ` : ""}
-
-            <div>
-              <div class="section-title">Complaints &amp; Symptoms</div>
-              <div style="font-size: 14px; padding-left: 5px;">${prescription.complaints || "Routine Checkup"}</div>
             </div>
-
-            <div>
-              <div class="section-title">Diagnosis</div>
-              <div style="font-size: 14px; padding-left: 5px; font-weight: 500;">${prescription.Diagnosis || "Under Observation"}</div>
-            </div>
-
-            <div style="margin-top: 15px;">
-              <div class="rx-symbol">Rx</div>
-              <div class="medicines-text">${prescription.medicines || "No medicines prescribed."}</div>
-            </div>
+          ` : ''}
+          <div>
+            <div class="sec-title">Complaints / Symptoms</div>
+            <div style="font-size: 13px;">${formattedVisit.complaints}</div>
           </div>
-
+          <div>
+            <div class="sec-title">Diagnosis</div>
+            <div style="font-size: 13px; font-weight: 600;">${formattedVisit.diagnosis}</div>
+          </div>
+          <div>
+            <div class="rx-symbol">Rx</div>
+            <div class="med-list">${formattedVisit.medicines}</div>
+          </div>
           <div class="footer">
-            📞 Phone: ${clinicConfig.contact.phone} • 📍 Address: ${clinicConfig.contact.address}<br>
-            <span style="font-size: 10px; color: #cbd5e1; margin-top: 5px; display: block;">Generated by Smart Clinic ERP</span>
+            📞 ${clinicConfig.contact.phone} • 📍 ${clinicConfig.contact.address}
           </div>
-
           <script>
             window.onload = function() {
               window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
+              setTimeout(function(){ window.close(); }, 500);
+            }
           </script>
         </body>
       </html>
     `;
 
-    printWindow.document.write(prescriptionHTML);
-    printWindow.document.close();
+    win.document.write(prescriptionHTML);
+    win.document.close();
 
     setSelectedToken(null);
-    setPrescription({ complaints: "", Diagnosis: "", medicines: "" });
+    setPrescriptionForm({ complaints: '', diagnosis: '', medicines: '' });
+    triggerNotification("🚀 Prescription generated & Token checked successfully!");
   };
 
-  const currentPatientHistory = selectedToken 
-    ? visitsHistory.filter(v => v.pid === selectedToken.pid) 
-    : [];
-
-  const handleAddLabReport = async (e: React.FormEvent) => {
+  const handleAddMedicineSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reportPatientName || !selectedLabTest || !testResult) {
-      return triggerAlert("⚠️ Please fill all Laboratory fields!");
+    if (!medForm.name || !medForm.wholesalePrice || !medForm.retailPrice || !medForm.stock) {
+      return triggerNotification("⚠️ All stock fields are required!");
     }
 
-    const testObject = labTestsCatalog.find(t => t.id === selectedLabTest);
-    if (!testObject) return;
-
-    const newReport = {
-      patient_name: reportPatientName,
-      pid: reportPid || "Walk-In",
-      test_name: testObject.name,
-      result_value: testResult,
-      date: new Date().toLocaleDateString('en-GB'),
-      status: "Verified",
+    const payload: Medicine = {
+      id: `MED-${Date.now()}`,
+      name: medForm.name,
+      wholesale_price: parseFloat(medForm.wholesalePrice),
+      wholesalePrice: parseFloat(medForm.wholesalePrice),
+      retail_price: parseFloat(medForm.retailPrice),
+      retailPrice: parseFloat(medForm.retailPrice),
+      stock: parseInt(medForm.stock, 10),
+      min_stock_alert: parseInt(medForm.minStockAlert, 10),
+      minStockAlert: parseInt(medForm.minStockAlert, 10)
     };
 
-    if (supabase) {
+    if (syncStatus === 'live' && supabase) {
       try {
-        await supabase.from("lab_reports").insert([newReport]);
-        fetchDataFromSupabase();
+        await supabase.from('medicines').insert([payload]);
       } catch (err) {
-        console.error("Lab insert error:", err);
+        console.error("Cloud saving product failed", err);
       }
-    } else {
-      const localReport: LabReport = {
-        id: `LAB-REP-${Date.now()}`,
-        patientName: newReport.patient_name,
-        pid: newReport.pid,
-        testName: newReport.test_name,
-        resultValue: newReport.result_value,
-        date: newReport.date,
-        status: newReport.status
-      };
-      setLabReports(prev => [localReport, ...prev]);
     }
 
-    setReportPatientName("");
-    setReportPid("");
-    setTestResult("");
-    triggerAlert("🔬 Lab Report generated and verified successfully!");
+    setMedicinesStock(prev => [payload, ...prev]);
+    const currentLocalMeds = JSON.parse(localStorage.getItem("sc_medicines") || "[]");
+    localStorage.setItem("sc_medicines", JSON.stringify([payload, ...currentLocalMeds]));
+
+    setMedForm({ name: '', wholesalePrice: '', retailPrice: '', stock: '', minStockAlert: '20' });
+    triggerNotification("💊 Inventory item added successfully!");
   };
 
-  const handlePrintLabReport = (rep: LabReport) => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return triggerAlert("⚠️ Please allow popups to print laboratory reports!");
+  const handleDeleteMedicine = async (id: string) => {
+    if (syncStatus === 'live' && supabase) {
+      try {
+        await supabase.from('medicines').delete().eq('id', id);
+      } catch (err) {
+        console.error("Cloud deleting medicine failed", err);
+      }
+    }
+    setMedicinesStock(prev => prev.filter(m => m.id !== id));
+    const currentLocalMeds = JSON.parse(localStorage.getItem("sc_medicines") || "[]");
+    localStorage.setItem("sc_medicines", JSON.stringify(currentLocalMeds.filter((m: any) => m.id !== id)));
+    triggerNotification("🗑️ Item deleted from stock ledger.");
+  };
 
-    const testObject = labTestsCatalog.find(t => t.name === (rep.testName || rep.test_name));
+  const handleAddLabReportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!labForm.patientName || !labForm.resultValue || !labForm.pid) {
+      return triggerNotification("⚠️ All diagnostics fields must be completed!");
+    }
 
-    const reportHTML = `
+    const report: LabReport = {
+      id: `LAB-${Date.now()}`,
+      patientName: labForm.patientName,
+      patient_name: labForm.patientName,
+      pid: labForm.pid,
+      testName: labForm.testName,
+      test_name: labForm.testName,
+      resultValue: labForm.resultValue,
+      result_value: labForm.resultValue,
+      date: labForm.date,
+      status: "Verified"
+    };
+
+    if (syncStatus === 'live' && supabase) {
+      try {
+        await supabase.from('lab_reports').insert([report]);
+      } catch (err) {
+        console.error("Cloud saving report failed", err);
+      }
+    }
+
+    setLabRecords(prev => [report, ...prev]);
+    const currentLocalReports = JSON.parse(localStorage.getItem("sc_lab_reports") || "[]");
+    localStorage.setItem("sc_lab_reports", JSON.stringify([report, ...currentLocalReports]));
+
+    setLabForm({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: new Date().toISOString().split("T")[0] });
+    triggerNotification("🔬 Lab test outcome registered!");
+  };
+
+  const filteredLabPatients = labSearchQuery.trim() === ""
+    ? []
+    : patientsList.filter(p =>
+        p.name.toLowerCase().includes(labSearchQuery.toLowerCase()) ||
+        p.pid.toLowerCase().includes(labSearchQuery.toLowerCase())
+      );
+
+  const handleSelectLabPatient = (p: Patient) => {
+    setLabForm(prev => ({ ...prev, patientName: p.name, pid: p.pid }));
+    setLabSearchQuery('');
+    setShowLabSearchResults(false);
+  };
+
+  const filteredBillingPatients = billingSearchQuery.trim() === ""
+    ? []
+    : patientsList.filter(p =>
+        p.name.toLowerCase().includes(billingSearchQuery.toLowerCase()) ||
+        p.pid.toLowerCase().includes(billingSearchQuery.toLowerCase())
+      );
+
+  const handleSelectBillingPatient = (p: Patient) => {
+    setBillingPatient(p);
+    setBillingSearchQuery('');
+    setShowBillingSearchResults(false);
+    // Auto populate cart with basic consultation fee
+    setBillItems([{ id: 'OPD-FEE', name: 'OPD Consultation Fee', price: customOpdFee, type: 'OPD', qty: 1 }]);
+  };
+
+  const handleAddPharmacyProductToBill = () => {
+    if (!selectedPharmacyProduct) return;
+    const med = medicinesStock.find(m => m.id === selectedPharmacyProduct);
+    if (!med) return;
+
+    if (med.stock <= 0) {
+      return triggerNotification("❌ Product out of stock! Cannot allocate to bill.");
+    }
+
+    // Check if product is already in our checkout cart
+    const existingIndex = billItems.findIndex(item => item.id === med.id);
+    if (existingIndex > -1) {
+      const currentQty = billItems[existingIndex].qty;
+      if (currentQty >= med.stock) {
+        return triggerNotification(`⚠️ Cannot exceed available stock limit (${med.stock} items).`);
+      }
+      setBillItems(prev => prev.map((item, idx) => idx === existingIndex ? { ...item, qty: item.qty + 1 } : item));
+    } else {
+      const price = med.retailPrice ?? med.retail_price ?? 0;
+      setBillItems(prev => [...prev, { id: med.id, name: med.name, price, type: 'Pharmacy', qty: 1, maxQty: med.stock }]);
+    }
+    triggerNotification(`💊 Added ${med.name} to patient bill`);
+  };
+
+  const handleAddLabTestToBill = () => {
+    if (!selectedLabTest) return;
+    // Map of common pricing structures
+    const testPricing: { [key: string]: number } = {
+      'CBC (Complete Blood Count)': 600,
+      'Routine Urine Analysis': 300,
+      'Blood Sugar Profile': 200,
+      'Lipid Cholesterol Profile': 1200,
+      'Liver Function Tests (LFT)': 1500,
+      'Renal Kidney Profile (RFT)': 1000
+    };
+    const price = testPricing[selectedLabTest] || 500;
+    
+    // Avoid double billing same diagnostic panel
+    const existing = billItems.some(item => item.id === `LAB-${selectedLabTest}`);
+    if (existing) return triggerNotification("⚠️ Test already listed on receipt.");
+
+    setBillItems(prev => [...prev, { id: `LAB-${selectedLabTest}`, name: `Lab: ${selectedLabTest}`, price, type: 'Lab', qty: 1 }]);
+    triggerNotification(`🔬 Added ${selectedLabTest} panel to patient bill`);
+  };
+
+  const handleRemoveBillItem = (id: string) => {
+    setBillItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleQuantityChange = (id: string, newQty: number) => {
+    if (newQty <= 0) return handleRemoveBillItem(id);
+    const target = billItems.find(item => item.id === id);
+    if (target && target.maxQty && newQty > target.maxQty) {
+      return triggerNotification(`⚠️ Insufficient stock available (Max: ${target.maxQty})`);
+    }
+    setBillItems(prev => prev.map(item => item.id === id ? { ...item, qty: newQty } : item));
+  };
+
+  const handleCheckoutAndPrintReceipt = async () => {
+    if (!billingPatient) return;
+    
+    const opdSum = billItems.filter(item => item.type === 'OPD').reduce((s, i) => s + (i.price * i.qty), 0);
+    const pharmSum = billItems.filter(item => item.type === 'Pharmacy').reduce((s, i) => s + (i.price * i.qty), 0);
+    const labSum = billItems.filter(item => item.type === 'Lab').reduce((s, i) => s + (i.price * i.qty), 0);
+    const subtotal = opdSum + pharmSum + labSum;
+    const finalTotal = Math.max(0, subtotal - billDiscount);
+
+    const receipt: BillingRecord = {
+      id: `INV-${Date.now()}`,
+      patientName: billingPatient.name,
+      patient_name: billingPatient.name,
+      pid: billingPatient.pid,
+      opdFee: opdSum,
+      opd_fee: opdSum,
+      pharmacyTotal: pharmSum,
+      pharmacy_total: pharmSum,
+      labTotal: labSum,
+      lab_total: labSum,
+      discount: billDiscount,
+      grandTotal: finalTotal,
+      grand_total: finalTotal,
+      date: new Date().toLocaleDateString('en-GB')
+    };
+
+    // A. Commit billing ledger entry to database
+    if (syncStatus === 'live' && supabase) {
+      try {
+        await supabase.from('billing_records').insert([receipt]);
+      } catch (err) {
+        console.error("Cloud processing invoice failed", err);
+      }
+    }
+
+    setBillingRecords(prev => [receipt, ...prev]);
+    const currentLocalBills = JSON.parse(localStorage.getItem("sc_bills") || "[]");
+    localStorage.setItem("sc_bills", JSON.stringify([receipt, ...currentLocalBills]));
+
+    // B. AUTO-DEDUCT PHARMACY STOCK LEVEL METRICS
+    const updatedMedsStock = [...medicinesStock];
+    const pharmacyItemsToDeduct = billItems.filter(item => item.type === 'Pharmacy');
+
+    for (const item of pharmacyItemsToDeduct) {
+      const idx = updatedMedsStock.findIndex(m => m.id === item.id);
+      if (idx > -1) {
+        const initialStock = updatedMedsStock[idx].stock;
+        const targetDeduction = item.qty;
+        const nextStock = Math.max(0, initialStock - targetDeduction);
+        updatedMedsStock[idx].stock = nextStock;
+
+        // Perform Cloud Stock Update
+        if (syncStatus === 'live' && supabase) {
+          try {
+            await supabase.from('medicines').update({ stock: nextStock }).eq('id', item.id);
+          } catch (err) {
+            console.error(`Failed to update stock in database for ${item.name}`, err);
+          }
+        }
+      }
+    }
+    setMedicinesStock(updatedMedsStock);
+    localStorage.setItem("sc_medicines", JSON.stringify(updatedMedsStock));
+
+    // C. Launch Printer Interface Window
+    const win = window.open('', '_blank');
+    if (!win) {
+      return triggerNotification("⚠️ Please allow popups to output invoices");
+    }
+
+    const receiptHTML = `
       <html>
         <head>
-          <title>Lab Report - ${rep.patientName || rep.patient_name}</title>
+          <title>Receipt - ${billingPatient.name}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 40px; color: #1e293b; }
-            .header { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 20px; }
-            .report-title { font-size: 22px; font-weight: bold; color: #2563eb; text-transform: uppercase; }
-            .info-table { width: 100%; margin-bottom: 30px; font-size: 14px; border-collapse: collapse; }
-            .info-table td { padding: 6px; }
-            .result-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
-            .result-table th, .result-table td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
-            .result-table th { bg-color: #f8fafc; color: #1e3a8a; }
-            .footer { position: fixed; bottom: 30px; left: 40px; right: 40px; text-align: center; font-size: 11px; border-top: 1px solid #e2e8f0; padding-top: 10px; color: #64748b; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h2>🧪 ${clinicConfig.clinicName} (Diagnostics)</h2>
-            <p>${clinicConfig.contact.address} • Phone: ${clinicConfig.contact.phone}</p>
-            <div class="report-title">Laboratory Investigation Report</div>
-          </div>
-          
-          <table class="info-table">
-            <tr>
-              <td><strong>Patient Name:</strong> ${rep.patientName || rep.patient_name}</td>
-              <td><strong>Patient ID (PID):</strong> ${rep.pid}</td>
-            </tr>
-            <tr>
-              <td><strong>Report Date:</strong> ${rep.date}</td>
-              <td><strong>Status:</strong> ${rep.status}</td>
-            </tr>
-          </table>
-
-          <table class="result-table">
-            <thead>
-              <tr>
-                <th>Test Investigation</th>
-                <th>Observed Result Value</th>
-                <th>Normal Reference Range</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>${rep.testName || rep.test_name}</strong></td>
-                <td style="font-size: 16px; font-weight: bold; color: #1e3a8a;">${rep.resultValue || rep.result_value}</td>
-                <td>${testObject?.referenceRange || "Standard"}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="footer">
-            Report clinically correlated & verified by ${clinicConfig.doctor.name} (${clinicConfig.doctor.degree})
-          </div>
-
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
-          </script>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(reportHTML);
-    printWindow.document.close();
-  };
-
-  const handleAddMedicine = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMedName || !newMedWS || !newMedRT || !newMedQty) {
-      return triggerAlert("⚠️ Please fill all medicine details!");
-    }
-
-    const newMed = {
-      name: newMedName,
-      wholesale_price: parseFloat(newMedWS),
-      retail_price: parseFloat(newMedRT),
-      stock: parseInt(newMedQty, 10),
-      min_stock_alert: parseInt(newMedAlert, 10)
-    };
-
-    if (supabase) {
-      try {
-        await supabase.from("medicines").insert([newMed]);
-        fetchDataFromSupabase();
-      } catch (err) {
-        console.error("Med insert error:", err);
-      }
-    } else {
-      const localMed: Medicine = {
-        id: `MED-${Date.now()}`,
-        name: newMed.name,
-        wholesalePrice: newMed.wholesale_price,
-        retailPrice: newMed.retail_price,
-        stock: newMed.stock,
-        minStockAlert: newMed.min_stock_alert
-      };
-      setMedicines(prev => [localMed, ...prev]);
-    }
-
-    setNewMedName("");
-    setNewMedWS("");
-    setNewMedRT("");
-    setNewMedQty("");
-    triggerAlert("📦 Medicine stock recorded successfully!");
-  };
-
-  const handleUpdateStock = async (id: string, amount: number) => {
-    if (supabase) {
-      try {
-        const item = medicines.find(m => m.id === id);
-        if (item) {
-          const updatedStock = Math.max(0, item.stock + amount);
-          await supabase.from("medicines").update({ stock: updatedStock }).eq("id", id);
-          fetchDataFromSupabase();
-        }
-      } catch (err) {
-        console.error("Stock adjust error:", err);
-      }
-    } else {
-      setMedicines(prev => prev.map(m => {
-        if (m.id === id) {
-          return { ...m, stock: Math.max(0, m.stock + amount) };
-        }
-        return m;
-      }));
-    }
-    triggerAlert("🔄 Inventory stock level adjusted!");
-  };
-
-  const handleAddInvoice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!billingPatientName) return triggerAlert("⚠️ Please enter Patient Name!");
-
-    const opd = parseFloat(billingOPDFee.toString()) || 0;
-    const pharm = parseFloat(billingPharmTotal) || 0;
-    const lab = parseFloat(billingLabTotal) || 0;
-    const disc = parseFloat(billingDiscount) || 0;
-
-    const total = (opd + pharm + lab) - disc;
-
-    const newInvoice = {
-      patient_name: billingPatientName,
-      pid: billingPid || "Walk-In",
-      opd_fee: opd,
-      pharmacy_total: pharm,
-      lab_total: lab,
-      discount: disc,
-      grand_total: total,
-      date: new Date().toLocaleDateString('en-GB'),
-    };
-
-    if (supabase) {
-      try {
-        await supabase.from("billing_records").insert([newInvoice]);
-        fetchDataFromSupabase();
-      } catch (err) {
-        console.error("Billing insert error:", err);
-      }
-    } else {
-      const localInvoice: Invoice = {
-        id: `INV-${Date.now()}`,
-        patientName: newInvoice.patient_name,
-        pid: newInvoice.pid,
-        opdFee: newInvoice.opd_fee,
-        pharmacyTotal: newInvoice.pharmacy_total,
-        labTotal: newInvoice.lab_total,
-        discount: newInvoice.discount,
-        grandTotal: newInvoice.grand_total,
-        date: newInvoice.date
-      };
-      setBillingRecords(prev => [localInvoice, ...prev]);
-    }
-
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return triggerAlert("⚠️ Please allow popups to print invoices");
-
-    const invoiceHTML = `
-      <html>
-        <head>
-          <title>Invoice - ${billingPatientName}</title>
-          <style>
-            body { font-family: monospace; padding: 20px; width: 280px; font-size: 12px; color: #000; }
+            body { font-family: monospace; font-size: 13px; color: #000; width: 80mm; padding: 10px; margin: auto; }
             .center { text-align: center; }
-            .bold { font-weight: bold; }
-            .border-b { border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 8px; }
-            .flex { display: flex; justify-content: space-between; }
-            .mt-10 { margin-top: 10px; }
+            .double-divider { border-bottom: 2px dashed #000; margin: 8px 0; }
+            .single-divider { border-bottom: 1px dotted #000; margin: 8px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { text-align: left; font-size: 12px; }
+            .text-right { text-align: right; }
+            .footer { font-size: 11px; margin-top: 15px; }
           </style>
         </head>
         <body>
           <div class="center">
-            <h3>🏥 ${clinicConfig.clinicName}</h3>
-            <p>${clinicConfig.contact.address}<br>Phone: ${clinicConfig.contact.phone}</p>
-            <p class="bold border-b">THERMAL TRANSACTION INVOICE</p>
+            <strong>🏥 ${clinicConfig.clinicName}</strong><br>
+            ${clinicConfig.tagline}<br>
+            ${clinicConfig.contact.phone}<br>
+            Invoice #: ${receipt.id}
           </div>
-
-          <div class="border-b">
-            <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
-            <div><strong>Patient ID:</strong> ${newInvoice.pid}</div>
-            <div><strong>Patient:</strong> ${newInvoice.patient_name}</div>
+          <div class="double-divider"></div>
+          <div>
+            <strong>Patient ID:</strong> ${billingPatient.pid}<br>
+            <strong>Name:</strong> ${billingPatient.name}<br>
+            <strong>Phone:</strong> ${billingPatient.phone || 'N/A'}<br>
+            <strong>Date:</strong> ${receipt.date}
           </div>
-
-          <div class="border-b">
-            <div class="flex"><span>OPD Doctor Fee:</span><span>${opd} PKR</span></div>
-            <div class="flex"><span>Pharmacy Charges:</span><span>${pharm} PKR</span></div>
-            <div class="flex"><span>Laboratory Tests:</span><span>${lab} PKR</span></div>
+          <div class="double-divider"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>Item Details</th>
+                <th class="text-right">Qty</th>
+                <th class="text-right">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${billItems.map(item => `
+                <tr>
+                  <td>${item.name}</td>
+                  <td class="text-right">${item.qty}</td>
+                  <td class="text-right">${item.price * item.qty}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <div class="single-divider"></div>
+          <table>
+            <tr>
+              <td>Subtotal:</td>
+              <td class="text-right">${subtotal} PKR</td>
+            </tr>
+            ${billDiscount > 0 ? `
+              <tr>
+                <td>Discount Given:</td>
+                <td class="text-right">-${billDiscount} PKR</td>
+              </tr>
+            ` : ''}
+            <tr style="font-weight: bold; font-size: 14px;">
+              <td>Grand Total:</td>
+              <td class="text-right">${finalTotal} PKR</td>
+            </tr>
+          </table>
+          <div class="double-divider"></div>
+          <div class="center footer">
+            Thank you for choosing us!<br>
+            Please visit again.
           </div>
-
-          <div class="border-b">
-            <div class="flex"><span>Sub-Total:</span><span>${opd + pharm + lab} PKR</span></div>
-            <div class="flex"><span>Discount Given:</span><span>-${disc} PKR</span></div>
-            <div class="flex bold"><span>GRAND TOTAL:</span><span>${total} PKR</span></div>
-          </div>
-
-          <div class="center mt-10">
-            <p class="bold">Thank You for choosing us!</p>
-            <p style="font-size: 9px; color: #555;">Software built by Smart Clinic ERP</p>
-          </div>
-
           <script>
             window.onload = function() {
               window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
+              setTimeout(function(){ window.close(); }, 500);
+            }
           </script>
         </body>
       </html>
     `;
 
-    printWindow.document.write(invoiceHTML);
-    printWindow.document.close();
+    win.document.write(receiptHTML);
+    win.document.close();
 
-    setBillingPid("");
-    setBillingPatientName("");
-    setBillingPharmTotal("");
-    setBillingLabTotal("");
-    setBillingDiscount("0");
-    triggerAlert("💳 Invoice logged & printed successfully!");
+    // Reset Form states
+    setBillingPatient(null);
+    setBillItems([]);
+    setBillDiscount(0);
+    triggerNotification("🚀 POS Invoice created and inventory levels decremented!");
   };
 
-  const handleAddExpense = async (e: React.FormEvent) => {
+  const handleAddExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!expenseTitle || !expenseAmount) return triggerAlert("⚠️ Please enter Title and Amount!");
-
-    const newExpense = {
-      title: expenseTitle,
-      amount: parseFloat(expenseAmount),
-      category: expenseCategory,
-      date: expenseDate,
-    };
-
-    if (supabase) {
-      try {
-        await supabase.from("expenses").insert([newExpense]);
-        fetchDataFromSupabase();
-      } catch (err) {
-        console.error("Expense insert error:", err);
-      }
-    } else {
-      const localExpense: Expense = {
-        id: `EXP-${Date.now()}`,
-        title: newExpense.title,
-        amount: newExpense.amount,
-        category: newExpense.category,
-        date: newExpense.date
-      };
-      setExpenses(prev => [localExpense, ...prev]);
+    if (!expenseForm.title || !expenseForm.amount) {
+      return triggerNotification("⚠️ Expense title and amount values are required!");
     }
 
-    setExpenseTitle("");
-    setExpenseAmount("");
-    triggerAlert("💸 Expense Logged Successfully!");
+    const payload: Expense = {
+      id: `EXP-${Date.now()}`,
+      title: expenseForm.title,
+      amount: parseFloat(expenseForm.amount),
+      category: expenseForm.category,
+      date: expenseForm.date
+    };
+
+    if (syncStatus === 'live' && supabase) {
+      try {
+        await supabase.from('expenses').insert([payload]);
+      } catch (err) {
+        console.error("Cloud saving expense failed", err);
+      }
+    }
+
+    setExpensesLedger(prev => [payload, ...prev]);
+    const currentLocalExpenses = JSON.parse(localStorage.getItem("sc_expenses") || "[]");
+    localStorage.setItem("sc_expenses", JSON.stringify([payload, ...currentLocalExpenses]));
+
+    setExpenseForm({ title: '', amount: '', category: 'Tea & Refreshments', date: new Date().toISOString().split("T")[0] });
+    triggerNotification("💸 Operational expense successfully logged!");
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (supabase) {
+    if (syncStatus === 'live' && supabase) {
       try {
-        await supabase.from("expenses").delete().eq("id", id);
-        fetchDataFromSupabase();
+        await supabase.from('expenses').delete().eq('id', id);
       } catch (err) {
-        console.error("Expense delete error:", err);
+        console.error("Cloud deleting expense failed", err);
       }
-    } else {
-      setExpenses(prev => prev.filter(exp => exp.id !== id));
     }
-    triggerAlert("🗑️ Expense Record Deleted!");
+    setExpensesLedger(prev => prev.filter(e => e.id !== id));
+    const currentLocalExpenses = JSON.parse(localStorage.getItem("sc_expenses") || "[]");
+    localStorage.setItem("sc_expenses", JSON.stringify(currentLocalExpenses.filter((e: any) => e.id !== id)));
+    triggerNotification("🗑️ Expense row deleted.");
   };
 
-  const totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
-  const autoOPDRevenue = visitsHistory.length * (clinicConfig.doctor.consultationFee || 500);
-  
-  const autoLabRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.labTotal ?? rec.lab_total) || 0), 0);
-  const autoPharmRevenue = billingRecords.reduce((sum, rec) => sum + (Number(rec.pharmacyTotal ?? rec.pharmacy_total) || 0), 0);
-  
-  const totalRevenue = autoOPDRevenue + autoLabRevenue + autoPharmRevenue + manualRevenue;
-  const netProfit = totalRevenue - totalExpenses;
+  const totalOpdEarnings = billingRecords.reduce((sum, item) => sum + (item.opdFee ?? item.opd_fee ?? 0), 0);
+  const totalPharmEarnings = billingRecords.reduce((sum, item) => sum + (item.pharmacyTotal ?? item.pharmacy_total ?? 0), 0);
+  const totalLabEarnings = billingRecords.reduce((sum, item) => sum + (item.labTotal ?? item.lab_total ?? 0), 0);
+  const totalGrossEarnings = billingRecords.reduce((sum, item) => sum + (item.grandTotal ?? item.grand_total ?? 0), 0);
+  const totalExpensesLogged = expensesLedger.reduce((sum, item) => sum + item.amount, 0);
+  const totalNetClinicProfit = totalGrossEarnings - totalExpensesLogged;
 
-  if (!userRole) {
+  if (!mounted) {
     return (
-      <div className="min-h-screen bg-gradient-to-tr from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center p-4">
-        <div className="bg-white/95 backdrop-blur-md rounded-3xl p-8 max-w-md w-full shadow-2xl border border-white/20 text-center">
-          <span className="text-5xl block animate-pulse">🏥</span>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-4">
-            {clinicConfig.clinicName}
-          </h2>
-          <p className="text-xs text-blue-600 font-extrabold tracking-widest uppercase mt-1">Smart Security Gateway</p>
-          <p className="text-xs text-slate-500 mt-2">
-            Please enter your security PIN code to access the ERP terminal dashboard.
-          </p>
+      <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white font-sans">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Booting Premium Clinic ERP Core...</p>
+        </div>
+      </div>
+    );
+  }
 
-          <form onSubmit={handleLoginSubmit} className="mt-8 space-y-4 text-left">
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-950 font-sans p-4">
+        <div className="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl">
+          <div className="text-center mb-6">
+            <span className="text-4xl">🏥</span>
+            <h1 className="text-2xl font-black text-white mt-3">{clinicConfig.clinicName}</h1>
+            <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-semibold">Security Authentication Portal</p>
+          </div>
+          <form onSubmit={handleSecurityPinLogin} className="space-y-4">
             <div>
-              <label className="block text-[11px] font-black text-slate-500 uppercase tracking-wider mb-1.5">
-                🔒 Security PIN Code
-              </label>
-              <input 
-                type="password" 
+              <label className="block text-xs text-slate-400 font-bold uppercase mb-1.5">Enter Verification PIN Code</label>
+              <input
+                type="password"
                 maxLength={4}
                 value={pinInput}
-                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
-                placeholder="••••" 
-                className="w-full bg-slate-100 text-slate-900 text-center text-2xl tracking-widest font-black py-3 rounded-2xl border-2 border-slate-200 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all"
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="••••"
+                className="w-full bg-slate-800 border border-slate-700 text-white text-center py-3.5 rounded-xl font-mono text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
-            {loginError && (
-              <p className="text-red-500 font-bold text-xs text-center bg-red-50 py-2 rounded-xl">
-                {loginError}
-              </p>
-            )}
-
-            <button 
-              type="submit" 
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3 px-4 rounded-2xl text-sm transition-colors shadow-lg shadow-blue-500/20"
-            >
-              Verify PIN &amp; Unlock Software
+            {pinError && <p className="text-xs text-red-500 font-semibold text-center">{pinError}</p>}
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition-colors">
+              Access ERP Dashboard ➡️
             </button>
           </form>
-
-          <div className="mt-8 pt-6 border-t border-slate-100 text-[10px] text-slate-400 space-y-1">
-            <p>💡 Hint: Doctor PIN: <strong className="text-slate-600">4142</strong> | Receptionist PIN: <strong className="text-slate-600">1122</strong></p>
-            <p>© {new Date().getFullYear()} • Securely Managed ERP System</p>
+          <div className="mt-6 border-t border-slate-800 pt-4 text-center text-[10px] text-slate-500 space-y-1">
+            <p>Doctor PIN: <strong>4142</strong> • Receptionist PIN: <strong>1122</strong></p>
+            <p>© {new Date().getFullYear()} Smart ERP Systems. All rights preserved.</p>
           </div>
         </div>
       </div>
@@ -1142,167 +1067,186 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4 shadow-sm">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+    <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
+      {/* Top Header Navigation Panel */}
+      <header className="bg-slate-900 text-white shadow-md">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🏥</span>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-black tracking-tight text-blue-600 flex items-center gap-2">
-                  🏥 {clinicConfig.clinicName}
-                </h1>
-                {userRole === "doctor" ? (
-                  <span className="bg-blue-100 text-blue-700 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Doctor Desk</span>
-                ) : (
-                  <span className="bg-amber-100 text-amber-800 font-bold text-[9px] uppercase px-2 py-0.5 rounded-full">Receptionist Desk</span>
-                )}
-              </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">{clinicConfig.tagline}</p>
-            </div>
-            {/* Supabase Status Indicator */}
-            <div className="flex items-center gap-1.5 mt-1 sm:mt-0 sm:ml-4">
-              <span className={`w-2.5 h-2.5 rounded-full ${dbStatus === "connected" ? "bg-emerald-500 animate-pulse" : "bg-amber-500 animate-pulse"}`}></span>
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                {dbStatus === "connected" ? "Live Database Sync" : "Local Storage Backed"}
-              </span>
+              <h1 className="text-lg font-black leading-tight">{clinicConfig.clinicName}</h1>
+              <p className="text-[11px] text-blue-400 font-semibold">{clinicConfig.tagline}</p>
             </div>
           </div>
-          
-          <nav className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            {userRole === "doctor" && (
-              <button onClick={() => setActiveTab("dashboard")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "dashboard" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>📊 Dash</button>
-            )}
-            
-            <button onClick={() => setActiveTab("opd")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "opd" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>🎫 OPD &amp; Queue</button>
-            
-            {userRole === "doctor" && (
-              <button onClick={() => setActiveTab("lab")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "lab" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>🔬 Lab Tests</button>
-            )}
 
-            {userRole === "doctor" && (
-              <button onClick={() => setActiveTab("pharmacy")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "pharmacy" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>📦 Pharmacy</button>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Supabase status display */}
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${syncStatus === 'live' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${syncStatus === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+              {syncStatus === 'live' ? 'Live Cloud Sync' : 'Local Storage Fallback'}
+            </div>
 
-            <button onClick={() => setActiveTab("billing")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "billing" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>💳 Billing Engine</button>
-            
-            {userRole === "doctor" && (
-              <button onClick={() => setActiveTab("expense")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "expense" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>💸 Expenses Ledger</button>
-            )}
+            <div className="bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs font-semibold">
+              Role: <span className="text-blue-400 font-bold">{userRole}</span>
+            </div>
 
-            <button 
-              onClick={handleLogout} 
-              className="text-xs text-red-600 hover:bg-red-50 font-black px-3 py-1.5 rounded-lg transition-all border border-transparent hover:border-red-200"
-              title="Click to lock the ERP console"
-            >
-              🔒 Lock Screen
+            <button onClick={handleLogout} className="text-xs bg-red-600/15 text-red-400 hover:bg-red-600 hover:text-white border border-red-500/20 px-3 py-1 rounded-lg font-bold transition-colors">
+              Exit Desk 🔒
             </button>
-          </nav>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
-        {alertMessage && (
-          <div className="fixed top-4 right-4 z-50 bg-slate-950 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 border border-slate-700 animate-bounce">
-            <span>🔔</span>
-            <p className="text-xs font-bold">{alertMessage}</p>
+      {/* Tabs Switcher Panel */}
+      <nav className="bg-white border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 flex overflow-x-auto gap-1">
+          {userRole === 'Doctor' && (
+            <button onClick={() => setActiveTab('dashboard')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'dashboard' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+              📊 Overview Analytics
+            </button>
+          )}
+          <button onClick={() => setActiveTab('opd')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'opd' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+            🎟️ OPD Queue Registry
+          </button>
+          {userRole === 'Doctor' && (
+            <button onClick={() => setActiveTab('pharmacy')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'pharmacy' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+              💊 Pharmacy stock
+            </button>
+          )}
+          {userRole === 'Doctor' && (
+            <button onClick={() => setActiveTab('lab')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'lab' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+              🔬 Diagnostics Lab
+            </button>
+          )}
+          <button onClick={() => setActiveTab('billing')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'billing' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+            💵 POS Checkout & Billing
+          </button>
+          {userRole === 'Doctor' && (
+            <button onClick={() => setActiveTab('expenses')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'expenses' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+              💸 Expenses Ledger
+            </button>
+          )}
+        </div>
+      </nav>
+
+      {/* Global alert banner notifications */}
+      {alertMessage && (
+        <div className="fixed bottom-4 right-4 z-50 bg-slate-900 border border-slate-700 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce">
+          <span className="text-lg">🔔</span>
+          <p className="text-xs font-bold">{alertMessage}</p>
+        </div>
+      )}
+
+      {/* Main Viewport Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
+        
+        {}
+        {activeTab === 'dashboard' && userRole === 'Doctor' && (
+          <div className="space-y-6">
+            {/* Stats Cards Grid Layout */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-xl">👥</div>
+                <div>
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Patients Registered</span>
+                  <h3 className="text-2xl font-black text-slate-800">{patientsList.length}</h3>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-xl">🏥</div>
+                <div>
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">OPD Active Queue</span>
+                  <h3 className="text-2xl font-black text-slate-800">{tokenQueue.length}</h3>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center text-xl">🔬</div>
+                <div>
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Diagnostics Tracked</span>
+                  <h3 className="text-2xl font-black text-slate-800">{labRecords.length}</h3>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 border-l-4 border-l-emerald-500">
+                <div className="w-12 h-12 rounded-xl bg-teal-100 flex items-center justify-center text-xl">💳</div>
+                <div>
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Net Revenue Realized</span>
+                  <h3 className="text-2xl font-black text-emerald-600">{totalNetClinicProfit} {clinicConfig.currency}</h3>
+                </div>
+              </div>
+            </div>
+
+            {/* Double Column Detailed Analytics Panels */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Financial Summary */}
+              <div className="lg:col-span-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">💵 Revenue Breakdown</h3>
+                <div className="space-y-3 text-xs">
+                  <div className="flex justify-between font-semibold">
+                    <span className="text-slate-500">OPD Consultation Fees:</span>
+                    <span className="text-slate-800">{totalOpdEarnings} {clinicConfig.currency}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span className="text-slate-500">Pharmacy Dispensing:</span>
+                    <span className="text-slate-800">{totalPharmEarnings} {clinicConfig.currency}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span className="text-slate-500">Laboratory Incomes:</span>
+                    <span className="text-slate-800">{totalLabEarnings} {clinicConfig.currency}</span>
+                  </div>
+                  <div className="border-t border-slate-100 pt-2 flex justify-between font-bold text-sm">
+                    <span className="text-slate-500">Gross Income:</span>
+                    <span className="text-slate-800">{totalGrossEarnings} {clinicConfig.currency}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-sm text-red-500">
+                    <span>Clinic Expenses:</span>
+                    <span>-{totalExpensesLogged} {clinicConfig.currency}</span>
+                  </div>
+                  <div className="border-t-2 border-dashed border-slate-200 pt-2 flex justify-between font-black text-base text-emerald-600">
+                    <span>Net Income:</span>
+                    <span>{totalNetClinicProfit} {clinicConfig.currency}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Patient Visits Overview */}
+              <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">📜 Recent Patient Visits Log</h3>
+                <div className="flex-1 overflow-y-auto max-h-[220px] space-y-2 pr-1">
+                  {visitsHistory.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 text-xs">No examination medical checkups recorded yet.</div>
+                  ) : (
+                    visitsHistory.slice(0, 5).map((visit, idx) => (
+                      <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs flex justify-between items-center hover:bg-slate-100/50 transition-colors">
+                        <div>
+                          <p className="font-extrabold text-slate-800">PID: {visit.pid}</p>
+                          <p className="text-slate-400 font-medium">Complaints: {visit.complaints}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">📅 {visit.date}</span>
+                          <p className="text-slate-400 mt-1">{visit.time}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* --- DASHBOARD VIEW --- */}
-        {activeTab === "dashboard" && userRole === "doctor" && (
-          <div className="space-y-8 animate-fadeIn">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 sm:p-8 text-white shadow-lg border border-blue-700/50">
-              <span className="bg-white/20 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
-                Welcome Back
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold mt-3">{clinicConfig.doctor.name}</h2>
-              <p className="text-blue-100 font-medium text-sm mt-1">{clinicConfig.doctor.specialty} — <span className="text-xs opacity-90">{clinicConfig.doctor.degree}</span></p>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 pt-6 border-t border-white/10 text-xs">
-                <div className="flex items-center gap-2 bg-white/5 p-3 rounded-xl">
-                  <span>📍</span>
-                  <div>
-                    <p className="text-blue-200">Location</p>
-                    <p className="font-semibold truncate">{clinicConfig.contact.address}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 bg-white/5 p-3 rounded-xl">
-                  <span>📞</span>
-                  <div>
-                    <p className="text-blue-200">Contact</p>
-                    <p className="font-semibold">{clinicConfig.contact.phone}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 bg-white/5 p-3 rounded-xl">
-                  <span>💵</span>
-                  <div>
-                    <p className="text-blue-200">OPD Fee</p>
-                    <p className="font-semibold">{clinicConfig.doctor.consultationFee} {clinicConfig.currency}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block">OPD Patients Checked</span>
-                <h3 className="text-2xl font-black text-slate-955 mt-1">{visitsHistory.length} <span className="text-xs font-normal text-slate-400">Visits</span></h3>
-                <p className="text-[10px] text-slate-400 mt-1">Total daily visits recorded</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block">Total Clinic Revenue</span>
-                <h3 className="text-2xl font-black text-slate-955 mt-1">{totalRevenue} <span className="text-xs font-normal text-slate-400">PKR</span></h3>
-                <p className="text-[10px] text-slate-400 mt-1">OPD + Pharmacy + Lab + Manual</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider block">Total Daily Expenses</span>
-                <h3 className="text-2xl font-black text-slate-950 mt-1">{totalExpenses} <span className="text-xs font-normal text-slate-400">PKR</span></h3>
-                <p className="text-[10px] text-slate-400 mt-1">Logs recorded inside ledger</p>
-              </div>
-
-              <div className={`p-5 rounded-2xl border text-white shadow-md ${netProfit >= 0 ? "bg-gradient-to-br from-emerald-500 to-teal-600 border-emerald-500" : "bg-gradient-to-br from-rose-500 to-red-600 border-rose-500"}`}>
-                <span className="text-[10px] font-black uppercase tracking-wider block opacity-95">Daily Net Profit Margin</span>
-                <h3 className="text-2xl font-black mt-1">{netProfit} <span className="text-xs font-medium">PKR</span></h3>
-                <p className="text-[10px] opacity-80 mt-1">{netProfit >= 0 ? "🎉 Positive margins." : "⚠️ Deficit margin caution."}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4">
-              <div onClick={() => setActiveTab("opd")} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group">
-                <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all">👥</span>
-                <h4 className="text-sm font-bold text-slate-900">OPD &amp; Patient Entry</h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">Manage daily tokens & patient EHR medical history timelines.</p>
-              </div>
-
-              <div onClick={() => setActiveTab("lab")} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all cursor-pointer group">
-                <span className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-amber-505 group-hover:text-white transition-all">🔬</span>
-                <h4 className="text-sm font-bold text-slate-900">Diagnostics Lab</h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">Input laboratory observed test values & generate printouts.</p>
-              </div>
-
-              <div onClick={() => setActiveTab("pharmacy")} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group">
-                <span className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-indigo-600 group-hover:text-white transition-all">📦</span>
-                <h4 className="text-sm font-bold text-slate-900">Pharmacy POS</h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">Log wholesale/retail stock, control limits & medicine items.</p>
-              </div>
-
-              <div onClick={() => setActiveTab("expense")} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-rose-300 transition-all cursor-pointer group">
-                <span className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center text-lg font-bold mb-3 group-hover:bg-rose-600 group-hover:text-white transition-all">💸</span>
-                <h4 className="text-sm font-bold text-slate-900">Expense Ledger</h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">Monitor office expenses, tea bills, staff salaries & closing balances.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* --- OPD VIEW --- */}
-        {activeTab === "opd" && (
-          <div className="space-y-8 animate-fadeIn">
-            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
-              <h4 className="text-sm font-bold mb-1 flex items-center gap-1.5">🔍 Search Returning Patient</h4>
-              <p className="text-xs text-blue-100 mb-3">Type Name, Phone or Patient ID (PID) to auto-fill details.</p>
+        {/* Dynamic OPD & Registration tabs */}
+        {activeTab === 'opd' && (
+          <div className="space-y-6">
+            
+            {/* Quick Search */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
+              <h4 className="text-sm font-bold mb-1 flex items-center gap-1.5">
+                🔍 Returning Patient Profile Quick Search
+              </h4>
+              <p className="text-xs text-blue-100 mb-3">Lookup existing profile records via Name, Phone or PID to avoid duplicate entries.</p>
               <div className="relative">
                 <input 
                   type="text" 
@@ -1311,7 +1255,7 @@ export default function Home() {
                     setSearchQuery(e.target.value);
                     setShowSearchResults(true);
                   }}
-                  placeholder="e.g. Ali, 03001234567, PID-1002" 
+                  placeholder="e.g. Ali, 03001234567, PID-1001" 
                   className="w-full px-4 py-2.5 rounded-xl text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
                 {showSearchResults && filteredPatients.length > 0 && (
@@ -1319,14 +1263,16 @@ export default function Home() {
                     {filteredPatients.map(p => (
                       <div 
                         key={p.pid} 
-                        onClick={() => handleSelectReturning(p)}
+                        onClick={() => handleSelectReturningPatient(p)}
                         className="flex justify-between items-center px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 text-xs"
                       >
                         <div>
                           <span className="font-extrabold text-blue-600 block">{p.name} ({p.gender})</span>
-                          <span className="text-slate-400 font-medium">Age: {p.age} • Phone: {p.phone || "N/A"}</span>
+                          <span className="text-slate-400 font-medium">Age: {p.age} • Phone: {p.phone || 'N/A'}</span>
                         </div>
-                        <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-bold text-[10px]">{p.pid}</span>
+                        <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-bold text-[10px]">
+                          {p.pid}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -1335,35 +1281,46 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Left Patient Form Card */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-bold text-slate-900">📝 New Patient Entry</h3>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    📝 Register Patient Token
+                  </h3>
                   {selectedExistingPid && (
-                    <button onClick={() => { setSelectedExistingPid(null); setPatientName(""); setPatientAge(""); setPatientPhone(""); }} className="text-[10px] text-red-500 font-extrabold border border-red-200 px-2 py-0.5 rounded hover:bg-red-50">Clear Auto-Fill</button>
+                    <button 
+                      onClick={() => {
+                        setSelectedExistingPid(null);
+                        setPatientForm({ name: '', age: '', gender: 'Male', phone: '' });
+                      }}
+                      className="text-[10px] text-red-500 font-extrabold border border-red-200 px-2 py-0.5 rounded-md hover:bg-red-50"
+                    >
+                      Clear Profile Fill
+                    </button>
                   )}
                 </div>
 
-                <form onSubmit={handlePatientSubmit} className="space-y-4">
+                <form onSubmit={handleRegisterTokenSubmit} className="space-y-4">
                   {selectedExistingPid && (
                     <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between">
-                      <span>🔄 Registering PID:</span>
+                      <span>🔄 Existing PID Selection:</span>
                       <span className="bg-amber-100 px-1.5 py-0.5 rounded">{selectedExistingPid}</span>
                     </div>
                   )}
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Patient Name *</label>
-                    <input type="text" value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="e.g. Muhammad Ali" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Patient Full Name *</label>
+                    <input type="text" value={patientForm.name} onChange={(e) => setPatientForm({...patientForm, name: e.target.value})} placeholder="e.g. Muhammad Ali" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Age *</label>
-                      <input type="number" value={patientAge} onChange={(e) => setPatientAge(e.target.value)} placeholder="e.g. 28" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                      <input type="number" value={patientForm.age} onChange={(e) => setPatientForm({...patientForm, age: e.target.value})} placeholder="Years" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Gender</label>
-                      <select value={patientGender} onChange={(e) => setPatientGender(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-blue-500">
+                      <select value={patientForm.gender} onChange={(e) => setPatientForm({...patientForm, gender: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-blue-500">
                         <option>Male</option>
                         <option>Female</option>
                         <option>Other</option>
@@ -1372,64 +1329,73 @@ export default function Home() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Phone Number</label>
-                    <input type="text" value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="03001234567" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Mobile Contact Phone Number</label>
+                    <input type="text" value={patientForm.phone} onChange={(e) => setPatientForm({...patientForm, phone: e.target.value})} placeholder="e.g. 03001234567" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">
-                    <span className="text-xs font-bold text-blue-600 block mb-2">🩺 Initial Vitals Check</span>
+                    <span className="text-xs font-bold text-blue-600 block mb-2">🩺 Vital Diagnostics (Optional)</span>
                     <div className="grid grid-cols-3 gap-2">
-                      <input type="text" value={patientVitals.bp} onChange={(e) => setPatientVitals({...patientVitals, bp: e.target.value})} placeholder="BP (120/80)" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center focus:outline-none focus:border-blue-500" />
-                      <input type="text" value={patientVitals.temp} onChange={(e) => setPatientVitals({...patientVitals, temp: e.target.value})} placeholder="Temp (98F)" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center focus:outline-none focus:border-blue-500" />
-                      <input type="text" value={patientVitals.weight} onChange={(e) => setPatientVitals({...patientVitals, weight: e.target.value})} placeholder="Weight (kg)" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center focus:outline-none focus:border-blue-500" />
+                      <input type="text" value={vitalsForm.bp} onChange={(e) => setVitalsForm({...vitalsForm, bp: e.target.value})} placeholder="BP (120/80)" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center focus:outline-none focus:border-blue-500" />
+                      <input type="text" value={vitalsForm.temp} onChange={(e) => setVitalsForm({...vitalsForm, temp: e.target.value})} placeholder="Temp (98.6F)" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center focus:outline-none focus:border-blue-500" />
+                      <input type="text" value={vitalsForm.weight} onChange={(e) => setVitalsForm({...vitalsForm, weight: e.target.value})} placeholder="Weight (kg)" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center focus:outline-none focus:border-blue-500" />
                     </div>
                   </div>
 
-                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors shadow-md mt-2">🎟️ Issue Token &amp; Save</button>
+                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors shadow-md shadow-blue-200 mt-2">
+                    🎟️ Save Record &amp; Issue Token
+                  </button>
                 </form>
               </div>
 
+              {/* Right Live Active Token Queue Card */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-bold text-slate-900">⏳ Active OPD Queue ({tokenList.length})</h3>
-                  <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-full">OPD Fee: {clinicConfig.doctor.consultationFee} PKR</span>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    ⏳ Active Queue Status ({tokenQueue.length})
+                  </h3>
+                  <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-full">
+                    OPD Consultation Fee: {clinicConfig.doctor.consultationFee} {clinicConfig.currency}
+                  </span>
                 </div>
 
-                {tokenList.length === 0 ? (
-                  <div className="text-center py-16 border-2 border-dashed rounded-xl bg-slate-50/50">
+                {tokenQueue.length === 0 ? (
+                  <div className="text-center py-16 border-2 border-dashed border-slate-100 rounded-xl bg-slate-50/50">
                     <p className="text-2xl mb-1">📭</p>
-                    <p className="text-sm font-semibold text-slate-400">No active queue</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Issue new patient tokens to begin.</p>
+                    <p className="text-sm font-semibold text-slate-400">No active queue tokens registered yet</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Please populate registration card forms on the left to queue.</p>
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-[450px] overflow-y-auto">
-                    {tokenList.map((token) => (
-                      <div key={token.tokenNumber} className="flex items-center justify-between p-4 bg-slate-50 hover:bg-blue-50/40 rounded-xl border border-slate-200/60 transition-all">
+                  <div className="space-y-3 max-h-[450px] overflow-y-auto pr-1">
+                    {tokenQueue.map((token) => (
+                      <div key={token.tokenNumber} className="flex items-center justify-between p-4 bg-slate-50 hover:bg-blue-50/40 rounded-xl border border-slate-200/60 transition-all group">
                         <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center font-black">
-                            <span className="text-[9px] uppercase opacity-75 font-bold">Token</span>
-                            <span className="text-lg leading-none">#{token.tokenNumber}</span>
+                          <div className="w-12 h-12 bg-blue-600 text-white rounded-xl flex flex-col items-center justify-center font-black shadow-sm">
+                            <span className="text-[10px] uppercase opacity-75 leading-none font-bold">Token</span>
+                            <span className="text-lg leading-none mt-0.5">#{token.tokenNumber}</span>
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
                               <h4 className="text-sm font-bold text-slate-900">{token.name}</h4>
-                              <span className="bg-slate-200 text-slate-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded">{token.pid}</span>
+                              <span className="bg-slate-200 text-slate-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded">
+                                {token.pid}
+                              </span>
                             </div>
-                            <p className="text-xs text-slate-500">{token.gender}, {token.age} Yrs • <span className="text-slate-400">{token.time}</span></p>
+                            <p className="text-xs text-slate-500 font-medium">
+                              {token.gender}, {token.age} Yrs • <span className="text-slate-400">{token.time}</span>
+                            </p>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {token.vitals.bp && <span className="text-[11px] bg-red-50 text-red-600 font-semibold px-2 py-0.5 rounded border">❤️ {token.vitals.bp}</span>}
-                          {token.vitals.temp && <span className="text-[11px] bg-amber-50 text-amber-600 font-semibold px-2 py-0.5 rounded border">🌡️ {token.vitals.temp}</span>}
-                          {token.vitals.weight && <span className="text-[11px] bg-emerald-50 text-emerald-600 font-semibold px-2 py-0.5 rounded border">⚖️ {token.vitals.weight}kg</span>}
+                          {token.vitals.bp && <span className="text-[11px] bg-red-50 text-red-600 font-semibold px-2 py-0.5 rounded-md border border-red-100">❤️ {token.vitals.bp}</span>}
+                          {token.vitals.temp && <span className="text-[11px] bg-amber-50 text-amber-600 font-semibold px-2 py-0.5 rounded-md border border-amber-100">🌡️ {token.vitals.temp}</span>}
+                          {token.vitals.weight && <span className="text-[11px] bg-emerald-50 text-emerald-600 font-semibold px-2 py-0.5 rounded-md border border-emerald-100">⚖️ {token.vitals.weight} kg</span>}
                           
-                          {userRole === "doctor" ? (
-                            <button onClick={() => handleCheckPatient(token)} className="text-xs text-white bg-blue-600 hover:bg-blue-700 font-bold px-3 py-1.5 rounded-lg transition-colors ml-2">Check ➡️</button>
-                          ) : (
-                            <span className="text-[10px] bg-amber-50 text-amber-700 font-bold border border-amber-200 px-2 py-1 rounded-md ml-2 flex items-center gap-1">
-                              🔒 Wait for Doctor
-                            </span>
+                          {userRole === 'Doctor' && (
+                            <button onClick={() => handleOpenExaminationDesk(token)} className="text-xs text-white bg-blue-600 hover:bg-blue-700 font-bold shadow-sm px-3 py-1.5 rounded-lg ml-2 transition-colors">
+                              Check ➡️
+                            </button>
                           )}
                         </div>
                       </div>
@@ -1439,308 +1405,335 @@ export default function Home() {
               </div>
             </div>
 
-            {selectedToken && userRole === "doctor" && (
-              <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all">
+            {/* EHR Doctor Consultation desk layout */}
+            {selectedToken && userRole === 'Doctor' && (
+              <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all mt-6">
                 <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
                   <div>
-                    <span className="bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded uppercase tracking-wider">Examination Desk</span>
-                    <h3 className="text-lg font-black mt-1">Checking: {selectedToken.name} (Token #{selectedToken.tokenNumber})</h3>
+                    <span className="bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
+                      Examination Desk
+                    </span>
+                    <h3 className="text-lg font-black mt-1.5">
+                      Checking: {selectedToken.name} (Token #{selectedToken.tokenNumber})
+                    </h3>
                   </div>
-                  <button onClick={() => setSelectedToken(null)} className="text-xs font-bold text-slate-400 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl">❌ Close Desk</button>
+                  <button onClick={() => setSelectedToken(null)} className="text-xs font-bold text-slate-400 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl transition-colors">
+                    ❌ Close Checkup Desk
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-x divide-slate-200">
-                  
-                  {/* Left Column: Demographics & History (3 Cols) */}
-                  <div className="lg:col-span-3 bg-slate-50/60 p-5 flex flex-col h-[540px]">
-                    <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
-                      <h4 className="font-extrabold text-slate-800 border-b pb-1.5 mb-2 flex justify-between">
-                        <span>📋 Demographics</span>
-                        <span className="text-blue-600">{selectedToken.pid}</span>
+                  {/* Left demographics and visit timelines */}
+                  <div className="lg:col-span-3 bg-slate-50 p-5 flex flex-col h-[520px]">
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
+                      <h4 className="font-extrabold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex justify-between items-center">
+                        <span>Profile info</span>
+                        <span className="text-blue-600 font-black">{selectedToken.pid}</span>
                       </h4>
-                      <p><strong className="text-slate-500">Gender/Age:</strong> {selectedToken.gender}, {selectedToken.age} Yrs</p>
-                      <p><strong className="text-slate-500">Phone:</strong> {selectedToken.phone || "N/A"}</p>
-                      <div className="pt-2 border-t text-slate-600">
+                      <p><strong className="text-slate-500">Gender/Age:</strong> {selectedToken.gender}, {selectedToken.age} Years</p>
+                      <p><strong className="text-slate-500">Phone:</strong> {selectedToken.phone || 'N/A'}</p>
+                      <div className="pt-2 border-t border-slate-100 space-y-1 text-slate-600">
                         <p className="font-semibold text-slate-700">Initial Vitals:</p>
-                        <p>❤️ BP: {selectedToken.vitals.bp || "Not Checked"}</p>
-                        <p>🌡️ Temp: {selectedToken.vitals.temp || "Not Checked"}</p>
-                        <p>⚖️ Weight: {selectedToken.vitals.weight ? `${selectedToken.vitals.weight}kg` : "Not Checked"}</p>
+                        <p>❤️ BP: {selectedToken.vitals.bp || "N/A"}</p>
+                        <p>🌡️ Temp: {selectedToken.vitals.temp || "N/A"}</p>
+                        <p>⚖️ Weight: {selectedToken.vitals.weight ? `${selectedToken.vitals.weight} kg` : "N/A"}</p>
                       </div>
                     </div>
 
+                    {/* EHR Medical History Timeline */}
                     <div className="flex-1 flex flex-col min-h-0">
-                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex justify-between">
-                        <span>📜 EHR History</span>
-                        <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-bold">{currentPatientHistory.length} Visits</span>
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <span>📜 Medical Timeline History</span>
+                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                          {visitsHistory.filter(v => v.pid === selectedToken.pid).length} Visits
+                        </span>
                       </h4>
 
-                      {currentPatientHistory.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center border border-dashed rounded-xl bg-white p-4 text-center">
-                          <p className="text-lg">🆕</p>
-                          <p className="text-xs font-bold text-slate-400 mt-1">First Time Visit</p>
-                        </div>
-                      ) : (
-                        <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
-                          {currentPatientHistory.map((visit) => (
-                            <div key={visit.id} className="bg-white p-2.5 rounded-xl border border-slate-200 relative">
-                              <div className="flex justify-between items-center mb-1">
-                                <span className="bg-slate-100 text-slate-700 font-bold px-1.5 py-0.5 rounded text-[9px]">📅 {visit.date}</span>
-                                <button onClick={() => handleCloneVisit(visit)} className="text-[9px] font-extrabold text-blue-600 hover:underline">📋 Copy Rx</button>
+                      <div className="flex-1 overflow-y-auto pr-1 space-y-3 text-xs">
+                        {visitsHistory.filter(v => v.pid === selectedToken.pid).length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">First time patient visit. No history profile recorded.</div>
+                        ) : (
+                          visitsHistory.filter(v => v.pid === selectedToken.pid).map((visit, idx) => (
+                            <div key={idx} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm relative">
+                              <div className="flex justify-between items-center mb-1.5">
+                                <span className="bg-slate-100 text-slate-700 font-black px-2 py-0.5 rounded text-[10px]">
+                                  📅 {visit.date}
+                                </span>
+                                <button onClick={() => handleCloneVisitRx(visit)} className="text-[10px] font-extrabold text-blue-600 hover:text-blue-800 flex items-center gap-0.5">
+                                  📋 Re-copy Rx
+                                </button>
                               </div>
-                              <p className="text-[11px] text-slate-600"><strong>Symptoms:</strong> {visit.complaints}</p>
-                              <p className="text-[11px] text-slate-600"><strong>Diag:</strong> {visit.diagnosis}</p>
-                              <p className="bg-slate-50 p-1 rounded font-mono text-[9px] mt-1 text-slate-700 whitespace-pre-wrap border-l-2 border-blue-400">{visit.medicines}</p>
+                              <div className="space-y-1 text-[11px] text-slate-600">
+                                <p><strong className="text-slate-800">Complaints:</strong> {visit.complaints}</p>
+                                <p><strong className="text-slate-800">Diagnosis:</strong> {visit.diagnosis}</p>
+                                <p className="bg-slate-50 p-1.5 rounded text-slate-700 font-mono text-[10px] mt-1 whitespace-pre-wrap">
+                                  {visit.medicines}
+                                </p>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Center Column: Form (6 Cols) */}
-                  <div className="lg:col-span-6 p-5 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Middle Checkup Prescription Builder */}
+                  <div className="lg:col-span-5 p-5 space-y-4">
+                    <div className="grid grid-cols-1 gap-3">
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Symptoms / Complaints</label>
-                        <textarea rows={3} value={prescription.complaints} onChange={(e) => setPrescription({...prescription, complaints: e.target.value})} placeholder="e.g. Cough, Fever, Body aches" className="w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-blue-500" />
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Patient Symptoms &amp; Complaints</label>
+                        <textarea rows={2} value={prescriptionForm.complaints} onChange={(e) => setPrescriptionForm({...prescriptionForm, complaints: e.target.value})} placeholder="Enter complaints or click shortcuts on the right" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Diagnosis</label>
-                        <textarea rows={3} value={prescription.Diagnosis} onChange={(e) => setPrescription({...prescription, Diagnosis: e.target.value})} placeholder="e.g. Upper Respiratory Tract Infection" className="w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-blue-500" />
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Clinic Diagnosis</label>
+                        <textarea rows={2} value={prescriptionForm.diagnosis} onChange={(e) => setPrescriptionForm({...prescriptionForm, diagnosis: e.target.value})} placeholder="Enter diagnosis outcome" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Rx - Prescription &amp; Medicines</label>
-                      <textarea rows={7} value={prescription.medicines} onChange={(e) => setPrescription({...prescription, medicines: e.target.value})} placeholder="1. Tab Paracetamol 500mg -- 1+1+1 (5 days)&#10;2. Syp Hydryll -- 2 tsp daily" className="w-full px-3 py-2 border rounded-xl text-xs font-mono focus:outline-none focus:border-blue-500" />
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Rx - Prescribed Medicines &amp; Dosages</label>
+                      <textarea rows={6} value={prescriptionForm.medicines} onChange={(e) => setPrescriptionForm({...prescriptionForm, medicines: e.target.value})} placeholder="e.g.&#10;1. Tab Paracetamol 500mg -- 1+1+1 (5 Days)" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-blue-500" />
                     </div>
 
-                    <div className="flex justify-end pt-3 border-t">
-                      <button onClick={handlePrintPrescription} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded-xl text-xs shadow-md flex items-center gap-2">🖨️ Save &amp; Print Prescription</button>
-                    </div>
-                  </div>
-
-                  {/* Right Column: Smart Suggestions Sidebar (3 Cols) */}
-                  <div className="lg:col-span-3 bg-slate-50/60 p-4 flex flex-col h-[540px] overflow-hidden">
-                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 border-b pb-1">⚡ Smart Suggestions</h4>
-                    
-                    <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs">
-                      
-                      {/* Symptoms Suggestions */}
-                      <div className="space-y-1.5">
-                        <span className="font-extrabold text-blue-600 block text-[10px] uppercase">Complaints / Symptoms</span>
-                        <div className="flex flex-wrap gap-1">
-                          {suggestedSymptoms.map(sym => (
-                            <span key={sym} className="group relative bg-white hover:bg-blue-100 border text-slate-700 hover:text-blue-800 px-2 py-0.5 rounded-full cursor-pointer transition-all flex items-center gap-1">
-                              <span onClick={() => appendSymptom(sym)}>{sym}</span>
-                              <span onClick={() => deleteSymptomTemplate(sym)} className="hidden group-hover:inline text-red-500 font-bold ml-1 hover:text-red-700">×</span>
-                            </span>
-                          ))}
-                        </div>
-                        <div className="flex gap-1 mt-1">
-                          <input type="text" value={newSymptomInput} onChange={(e) => setNewSymptomInput(e.target.value)} placeholder="Add new symptom" className="flex-1 px-2 py-0.5 text-[11px] border rounded bg-white" />
-                          <button onClick={addNewSymptomTemplate} className="bg-blue-600 text-white px-2 py-0.5 rounded font-black">+</button>
-                        </div>
-                      </div>
-
-                      {/* Diagnosis Suggestions */}
-                      <div className="space-y-1.5 pt-2 border-t border-slate-200">
-                        <span className="font-extrabold text-blue-600 block text-[10px] uppercase">Diagnosis</span>
-                        <div className="flex flex-wrap gap-1">
-                          {suggestedDiagnoses.map(diag => (
-                            <span key={diag} className="group relative bg-white hover:bg-blue-100 border text-slate-700 hover:text-blue-800 px-2 py-0.5 rounded-full cursor-pointer transition-all flex items-center gap-1">
-                              <span onClick={() => appendDiagnosis(diag)}>{diag}</span>
-                              <span onClick={() => deleteDiagnosisTemplate(diag)} className="hidden group-hover:inline text-red-500 font-bold ml-1 hover:text-red-700">×</span>
-                            </span>
-                          ))}
-                        </div>
-                        <div className="flex gap-1 mt-1">
-                          <input type="text" value={newDiagnosisInput} onChange={(e) => setNewDiagnosisInput(e.target.value)} placeholder="Add diagnosis" className="flex-1 px-2 py-0.5 text-[11px] border rounded bg-white" />
-                          <button onClick={addNewDiagnosisTemplate} className="bg-blue-600 text-white px-2 py-0.5 rounded font-black">+</button>
-                        </div>
-                      </div>
-
-                      {/* Medicines Suggestions */}
-                      <div className="space-y-1.5 pt-2 border-t border-slate-200">
-                        <span className="font-extrabold text-blue-600 block text-[10px] uppercase">Medicines / Rx Templates</span>
-                        <div className="flex flex-col gap-1">
-                          {suggestedMedicines.map(med => (
-                            <div key={med} className="group flex justify-between items-center bg-white hover:bg-blue-50 border p-1.5 rounded-lg cursor-pointer transition-all">
-                              <span onClick={() => appendMedicine(med)} className="flex-1 text-[11px] font-medium text-slate-700">{med}</span>
-                              <span onClick={() => deleteMedicineTemplate(med)} className="hidden group-hover:inline text-red-500 font-bold ml-1 hover:text-red-700">×</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex gap-1 mt-1">
-                          <input type="text" value={newMedicineInput} onChange={(e) => setNewMedicineInput(e.target.value)} placeholder="Add prescription" className="flex-1 px-2 py-0.5 text-[11px] border rounded bg-white" />
-                          <button onClick={addNewMedicineTemplate} className="bg-blue-600 text-white px-2 py-0.5 rounded font-black">+</button>
-                        </div>
-                      </div>
-
+                    <div className="flex justify-end pt-3 border-t border-slate-100">
+                      <button onClick={handleCheckoutAndPrintPrescription} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl text-sm transition-colors shadow-md shadow-emerald-100 flex items-center gap-2">
+                        🖨️ Save Examination &amp; Print Prescription
+                      </button>
                     </div>
                   </div>
 
+                  {/* Right Smart Shortcuts suggests */}
+                  <div className="lg:col-span-4 bg-slate-50 p-5 overflow-y-auto h-[520px] space-y-4">
+                    <div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">⚡ Symptom Shortcuts</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {complaintsSuggestions.map((item, idx) => (
+                          <button key={idx} onClick={() => handleAddSymptomShortcut(item)} className="bg-white hover:bg-blue-100 text-slate-700 border border-slate-200 hover:border-blue-300 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all">
+                            + {item}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">⚡ Common Diagnosis</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {diagnosisSuggestions.map((item, idx) => (
+                          <button key={idx} onClick={() => handleAddDiagnosisShortcut(item)} className="bg-white hover:bg-blue-100 text-slate-700 border border-slate-200 hover:border-blue-300 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all">
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">⚡ Medicines Templates</span>
+                      <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                        {medicineTemplates.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg p-2 hover:border-blue-300 transition-all text-xs">
+                            <span onClick={() => handleAddMedicineShortcut(item)} className="font-mono text-slate-700 cursor-pointer hover:text-blue-600 flex-1">{item}</span>
+                            <button onClick={() => handleDeleteCustomMedicineTemplate(idx)} className="text-red-500 hover:text-red-700 font-bold pl-2">×</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-200 space-y-2">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">💾 Store Custom Template</span>
+                      <div className="flex gap-2">
+                        <input type="text" value={customTemplateInput} onChange={(e) => setCustomTemplateInput(e.target.value)} placeholder="e.g. Tab Flagyl 400mg -- 1+1+1" className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none" />
+                        <button onClick={handleSaveCustomMedicineTemplate} className="bg-blue-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs hover:bg-blue-700">+</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* --- LAB DIAGNOSTICS VIEW --- */}
-        {activeTab === "lab" && userRole === "doctor" && (
-          <div className="space-y-8 animate-fadeIn">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                <h3 className="text-base font-bold text-slate-900 mb-4">🔬 Enter Observed Lab Values</h3>
-                <form onSubmit={handleAddLabReport} className="space-y-4">
+        {/* Dynamic Pharmacy Stock Panel */}
+        {activeTab === 'pharmacy' && userRole === 'Doctor' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Left Stock Adder */}
+            <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
+              <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                💊 Add Inventory stock
+              </h3>
+              <form onSubmit={handleAddMedicineSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Medicine / Product Name *</label>
+                  <input type="text" value={medForm.name} onChange={(e) => setMedForm({...medForm, name: e.target.value})} placeholder="e.g. Tab Paracetamol 500mg" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Patient Name *</label>
-                    <input type="text" value={reportPatientName} onChange={(e) => setReportPatientName(e.target.value)} placeholder="e.g. Tariq Jamil" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Wholesale Price *</label>
+                    <input type="number" value={medForm.wholesalePrice} onChange={(e) => setMedForm({...medForm, wholesalePrice: e.target.value})} placeholder="PKR" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Patient PID (If any)</label>
-                      <input type="text" value={reportPid} onChange={(e) => setReportPid(e.target.value)} placeholder="e.g. PID-1001" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Select Test *</label>
-                      <select value={selectedLabTest} onChange={(e) => setSelectedLabTest(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none" >
-                        <option value="">-- Choose Test --</option>
-                        {labTestsCatalog.map(t => <option key={t.id} value={t.id}>{t.name} ({t.price} PKR)</option>)}
-                      </select>
-                    </div>
-                  </div>
-
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Observed Test Result *</label>
-                    <input type="text" value={testResult} onChange={(e) => setTestResult(e.target.value)} placeholder="e.g. Hb: 13.5 g/dL, Sugar: 125 mg/dL" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Retail POS Price *</label>
+                    <input type="number" value={medForm.retailPrice} onChange={(e) => setMedForm({...medForm, retailPrice: e.target.value})} placeholder="PKR" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
                   </div>
+                </div>
 
-                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm mt-2 transition-colors">🧬 Issue Lab Report</button>
-                </form>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Stock Quantity *</label>
+                    <input type="number" value={medForm.stock} onChange={(e) => setMedForm({...medForm, stock: e.target.value})} placeholder="Pills/Bottles" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Min Stock Alert</label>
+                    <input type="number" value={medForm.minStockAlert} onChange={(e) => setMedForm({...medForm, minStockAlert: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                  </div>
+                </div>
+
+                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors shadow-md shadow-emerald-100">
+                  Save Product &amp; Update Stock
+                </button>
+              </form>
+            </div>
+
+            {/* Right Stock Ledger list */}
+            <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-base font-bold text-slate-900">📦 Medicines Inventory Stock Ledger</h3>
+                <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-full">{medicinesStock.length} Products</span>
               </div>
 
-              <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-base font-bold text-slate-900 mb-4">📋 Verified Laboratory Reports Ledger</h3>
-                {labReports.length === 0 ? (
-                  <div className="text-center py-16 border-2 border-dashed rounded-xl bg-slate-50/50">
-                    <p className="text-sm font-semibold text-slate-400">No laboratory test reports verified today.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left">
-                      <thead>
-                        <tr className="border-b font-bold text-slate-400">
-                          <th className="py-2.5">Date</th>
-                          <th>Patient Name</th>
-                          <th>PID</th>
-                          <th>Test Investigation</th>
-                          <th>Result Value</th>
-                          <th className="text-center">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y text-slate-700">
-                        {labReports.map(rep => (
-                          <tr key={rep.id} className="hover:bg-slate-50">
-                            <td className="py-3">{rep.date}</td>
-                            <td className="font-bold">{rep.patientName || rep.patient_name}</td>
-                            <td><span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">{rep.pid}</span></td>
-                            <td className="font-semibold text-blue-600">{rep.testName || rep.test_name}</td>
-                            <td className="font-mono">{rep.resultValue || rep.result_value}</td>
-                            <td className="text-center"><button onClick={() => handlePrintLabReport(rep)} className="text-xs bg-slate-100 hover:bg-blue-100 text-blue-600 font-bold px-2.5 py-1 rounded-md transition-colors">🖨️ Print</button></td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-slate-400 uppercase font-black text-[10px]">
+                      <th className="py-3 px-2">Item Name</th>
+                      <th className="py-3 px-2 text-right">Wholesale</th>
+                      <th className="py-3 px-2 text-right">Retail Price</th>
+                      <th className="py-3 px-2 text-center">Remaining Stock</th>
+                      <th className="py-3 px-2 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {medicinesStock.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-slate-400">Inventory warehouse is currently empty. Add products.</td>
+                      </tr>
+                    ) : (
+                      medicinesStock.map((m) => {
+                        const minAlert = m.minStockAlert ?? m.min_stock_alert ?? 20;
+                        return (
+                          <tr key={m.id} className="hover:bg-slate-50">
+                            <td className="py-3 px-2 font-bold text-slate-800">{m.name}</td>
+                            <td className="py-3 px-2 text-right font-mono">{m.wholesalePrice ?? m.wholesale_price ?? 0} PKR</td>
+                            <td className="py-3 px-2 text-right font-mono text-emerald-600 font-bold">{m.retailPrice ?? m.retail_price ?? 0} PKR</td>
+                            <td className="py-3 px-2 text-center">
+                              <span className={`px-2.5 py-1 rounded-full text-[11px] font-black font-mono ${m.stock <= minAlert ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-slate-100 text-slate-700'}`}>
+                                {m.stock} {m.stock <= minAlert ? '⚠️ LOW STOCK' : ''}
+                              </span>
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <button onClick={() => handleDeleteMedicine(m.id)} className="text-red-500 hover:text-red-700 font-bold text-xs">Delete</button>
+                            </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
-        {/* --- PHARMACY VIEW --- */}
-        {activeTab === "pharmacy" && userRole === "doctor" && (
-          <div className="space-y-8 animate-fadeIn">
-            {medicines.some(m => m.stock <= (m.minStockAlert ?? m.min_stock_alert ?? 20)) && (
-              <div className="bg-red-50 border border-red-200 p-4 rounded-2xl text-red-800 text-xs flex items-center gap-2">
-                <span>⚠️</span>
-                <p className="font-bold">Caution: Low stock alert triggered for some pharmacy medicine items! Please audit wholesale items.</p>
-              </div>
-            )}
-
+        {/* Dynamic Diagnostics Lab tabs */}
+        {activeTab === 'lab' && userRole === 'Doctor' && (
+          <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Left Test adder */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                <h3 className="text-base font-bold text-slate-900 mb-4">📦 Add Medicine to Stock</h3>
-                <form onSubmit={handleAddMedicine} className="space-y-4">
+                <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  🔬 Laboratory test Registry
+                </h3>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Patient Search Database</span>
+                  <input type="text" value={labSearchQuery} onChange={(e) => { setLabSearchQuery(e.target.value); setShowLabSearchResults(true); }} placeholder="Type patient name or PID" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
+                  {showLabSearchResults && filteredLabPatients.length > 0 && (
+                    <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
+                      {filteredLabPatients.map(p => (
+                        <div key={p.pid} onClick={() => handleSelectLabPatient(p)} className="p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer font-bold text-blue-600">
+                          {p.name} ({p.pid})
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <form onSubmit={handleAddLabReportSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Medicine Title/Strength *</label>
-                    <input type="text" value={newMedName} onChange={(e) => setNewMedName(e.target.value)} placeholder="e.g. Tab Flagyl 400mg" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Selected Patient Name</label>
+                    <input type="text" value={labForm.patientName} className="w-full bg-slate-100 px-3 py-2 border border-slate-200 rounded-xl text-sm font-bold" readOnly />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Patient ID (PID)</label>
+                    <input type="text" value={labForm.pid} className="w-full bg-slate-100 px-3 py-2 border border-slate-200 rounded-xl text-sm font-bold font-mono" readOnly />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Test Panel Group</label>
+                    <select value={labForm.testName} onChange={(e) => setLabForm({...labForm, testName: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none">
+                      <option>CBC (Complete Blood Count)</option>
+                      <option>Routine Urine Analysis</option>
+                      <option>Blood Sugar Profile</option>
+                      <option>Lipid Cholesterol Profile</option>
+                      <option>Liver Function Tests (LFT)</option>
+                      <option>Renal Kidney Profile (RFT)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Diagnostic Report Result Outcome Value *</label>
+                    <input type="text" value={labForm.resultValue} onChange={(e) => setLabForm({...labForm, resultValue: e.target.value})} placeholder="e.g. Hb 13.5 g/dl, Sugar 140 mg/dl" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Wholesale Rate (PKR) *</label>
-                      <input type="number" step="0.01" value={newMedWS} onChange={(e) => setNewMedWS(e.target.value)} placeholder="e.g. 1.2" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Retail Selling (PKR) *</label>
-                      <input type="number" step="0.01" value={newMedRT} onChange={(e) => setNewMedRT(e.target.value)} placeholder="e.g. 2.5" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Quantity/Stock (Pills) *</label>
-                      <input type="number" value={newMedQty} onChange={(e) => setNewMedQty(e.target.value)} placeholder="e.g. 500" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Low-stock Level Alert</label>
-                      <input type="number" value={newMedAlert} onChange={(e) => setNewMedAlert(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
-                    </div>
-                  </div>
-
-                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors mt-2">📦 Save to Inventory</button>
+                  <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors shadow-md">
+                    Log Laboratory Report Outcomes
+                  </button>
                 </form>
               </div>
 
-              <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-base font-bold text-slate-900 mb-4">📋 Medicine Stock &amp; Inventory Table</h3>
+              {/* Right Diagnostic History Registry */}
+              <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+                <h3 className="text-base font-bold text-slate-900 mb-4">🔬 Patient Diagnostics Laboratory Ledger</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
+                  <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b text-slate-400 font-bold">
-                        <th className="py-2.5">Medicine Name</th>
-                        <th className="text-right">Wholesale Rate</th>
-                        <th className="text-right">Retail Rate</th>
-                        <th className="text-center">Stock Count</th>
-                        <th className="text-center">Status</th>
-                        <th className="text-center">Manage Stock</th>
+                      <tr className="border-b border-slate-100 text-slate-400 uppercase font-black text-[10px]">
+                        <th className="py-3 px-2">Patient Details</th>
+                        <th className="py-3 px-2">Diagnostic Test Group</th>
+                        <th className="py-3 px-2">Report Results Outcomes</th>
+                        <th className="py-3 px-2">Verified Date</th>
+                        <th className="py-3 px-2 text-center">Status</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y text-slate-700">
-                      {medicines.map(m => (
-                        <tr key={m.id} className="hover:bg-slate-50">
-                          <td className="py-3 font-bold">{m.name}</td>
-                          <td className="text-right font-mono">{(m.wholesalePrice ?? m.wholesale_price ?? 0)} PKR</td>
-                          <td className="text-right font-mono text-emerald-600 font-bold">{(m.retailPrice ?? m.retail_price ?? 0)} PKR</td>
-                          <td className={`text-center font-black font-mono ${m.stock <= (m.minStockAlert ?? m.min_stock_alert ?? 20) ? "text-red-500" : "text-slate-900"}`}>{m.stock}</td>
-                          <td className="text-center">
-                            {m.stock <= (m.minStockAlert ?? m.min_stock_alert ?? 20) ? (
-                              <span className="bg-red-50 text-red-600 font-bold px-2 py-0.5 rounded text-[9px] border border-red-100">Low Stock</span>
-                            ) : (
-                              <span className="bg-emerald-50 text-emerald-600 font-bold px-2 py-0.5 rounded text-[9px] border border-emerald-100">In Stock</span>
-                            )}
-                          </td>
-                          <td className="text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <button onClick={() => handleUpdateStock(m.id, 50)} className="text-[10px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-600 font-black px-1.5 py-0.5 rounded border">+50</button>
-                              <button onClick={() => handleUpdateStock(m.id, -50)} className="text-[10px] bg-slate-100 hover:bg-red-50 hover:text-red-600 font-black px-1.5 py-0.5 rounded border">-50</button>
-                            </div>
-                          </td>
+                    <tbody className="divide-y divide-slate-100">
+                      {labRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-400">No laboratory checkup outcomes registered yet.</td>
                         </tr>
-                      ))}
+                      ) : (
+                        labRecords.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="py-3 px-2">
+                              <span className="font-extrabold text-slate-800 block">{item.patientName ?? item.patient_name}</span>
+                              <span className="text-slate-400 text-[10px] font-mono">{item.pid}</span>
+                            </td>
+                            <td className="py-3 px-2 font-bold text-blue-600">{item.testName ?? item.test_name}</td>
+                            <td className="py-3 px-2 font-mono text-slate-700 font-bold">{item.resultValue ?? item.result_value}</td>
+                            <td className="py-3 px-2 font-medium text-slate-500">{item.date}</td>
+                            <td className="py-3 px-2 text-center">
+                              <span className="bg-emerald-100 text-emerald-800 font-black px-2 py-0.5 rounded text-[10px]">VERIFIED</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1749,207 +1742,241 @@ export default function Home() {
           </div>
         )}
 
-        {/* --- BILLING VIEW --- */}
-        {activeTab === "billing" && (
-          <div className="space-y-8 animate-fadeIn">
+        {/* Dynamic POS Checkout & Billing panels */}
+        {activeTab === 'billing' && (
+          <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* Left Patient Selector and Billing items cart */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                <h3 className="text-base font-bold text-slate-900 mb-4">💳 Print Invoices &amp; Receipts</h3>
-                <form onSubmit={handleAddInvoice} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Patient Name *</label>
-                    <input type="text" value={billingPatientName} onChange={(e) => setBillingPatientName(e.target.value)} placeholder="e.g. Zahid Khan" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
-                  </div>
+                <h3 className="text-base font-bold text-slate-900 mb-4">💵 POS Invoice Cart Generator</h3>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Patient PID (If any)</label>
-                      <input type="text" value={billingPid} onChange={(e) => setBillingPid(e.target.value)} placeholder="e.g. PID-1005" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none" />
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Search active patient files</span>
+                  <input type="text" value={billingSearchQuery} onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} placeholder="e.g. Muhammad, PID-1001" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
+                  {showBillingSearchResults && filteredBillingPatients.length > 0 && (
+                    <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
+                      {filteredBillingPatients.map(p => (
+                        <div key={p.pid} onClick={() => handleSelectBillingPatient(p)} className="p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer font-bold text-emerald-600">
+                          {p.name} ({p.pid})
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Doctor OPD Fee (PKR)</label>
-                      <input type="number" value={billingOPDFee} onChange={(e) => setBillingOPDFee(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none font-mono" />
+                  )}
+                </div>
+
+                {billingPatient ? (
+                  <div className="space-y-4">
+                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs space-y-1">
+                      <p className="font-extrabold text-emerald-900">Patient: {billingPatient.name}</p>
+                      <p className="text-emerald-700">Patient ID (PID): {billingPatient.pid}</p>
+                      <p className="text-emerald-700">Phone: {billingPatient.phone || 'N/A'}</p>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                    {/* Custom OPD Fee adjustment */}
                     <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Pharmacy Charges (PKR)</label>
-                      <input type="number" value={billingPharmTotal} onChange={(e) => setBillingPharmTotal(e.target.value)} placeholder="0" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none font-mono" />
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Consultation OPD Fee amount (PKR)</label>
+                      <input 
+                        type="number" 
+                        value={customOpdFee} 
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setCustomOpdFee(val);
+                          setBillItems(prev => prev.map(item => item.id === 'OPD-FEE' ? { ...item, price: val } : item));
+                        }} 
+                        className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs"
+                      />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Laboratory Investigations (PKR)</label>
-                      <input type="number" value={billingLabTotal} onChange={(e) => setBillingLabTotal(e.target.value)} placeholder="0" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none font-mono" />
+
+                    <div className="pt-2 border-t border-slate-100 space-y-3">
+                      <div>
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">🛒 Add Dispensing Pharmacy product</span>
+                        <div className="flex gap-2">
+                          <select value={selectedPharmacyProduct} onChange={(e) => setSelectedPharmacyProduct(e.target.value)} className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none">
+                            <option value="">-- Choose product --</option>
+                            {medicinesStock.map(m => (
+                              <option key={m.id} value={m.id}>{m.name} (Stock: {m.stock})</option>
+                            ))}
+                          </select>
+                          <button onClick={handleAddPharmacyProductToBill} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs">+</button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">🛒 Add Diagnostic Laboratory Tests</span>
+                        <div className="flex gap-2">
+                          <select value={selectedLabTest} onChange={(e) => setSelectedLabTest(e.target.value)} className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none">
+                            <option>CBC (Complete Blood Count)</option>
+                            <option>Routine Urine Analysis</option>
+                            <option>Blood Sugar Profile</option>
+                            <option>Lipid Cholesterol Profile</option>
+                            <option>Liver Function Tests (LFT)</option>
+                            <option>Renal Kidney Profile (RFT)</option>
+                          </select>
+                          <button onClick={handleAddLabTestToBill} className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs">+</button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Discount Coupon / Deductions (PKR)</label>
-                    <input type="number" value={billingDiscount} onChange={(e) => setBillingDiscount(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none font-mono" />
-                  </div>
-
-                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm mt-2 transition-colors">💳 Print Thermal Invoice</button>
-                </form>
-              </div>
-
-              <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-base font-bold text-slate-900 mb-4">📋 Daily Invoices &amp; Invoicing Transactions</h3>
-                {billingRecords.length === 0 ? (
-                  <div className="text-center py-16 border-2 border-dashed rounded-xl bg-slate-50/50">
-                    <p className="text-sm font-semibold text-slate-400">No invoice records logged today.</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left">
-                      <thead>
-                        <tr className="border-b text-slate-400 font-bold">
-                          <th className="py-2.5">Date</th>
-                          <th>Patient Name</th>
-                          <th>PID</th>
-                          <th className="text-right">OPD Fee</th>
-                          <th className="text-right">Pharmacy</th>
-                          <th className="text-right">Lab Fee</th>
-                          <th className="text-right text-emerald-600 font-black">Grand Total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y text-slate-700">
-                        {billingRecords.map(inv => (
-                          <tr key={inv.id} className="hover:bg-slate-50">
-                            <td className="py-3">{inv.date}</td>
-                            <td className="font-bold">{inv.patientName || inv.patient_name}</td>
-                            <td><span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">{inv.pid}</span></td>
-                            <td className="text-right font-mono">{inv.opdFee || inv.opd_fee} PKR</td>
-                            <td className="text-right font-mono">{inv.pharmacyTotal || inv.pharmacy_total} PKR</td>
-                            <td className="text-right font-mono">{inv.labTotal || inv.lab_total} PKR</td>
-                            <td className="text-right font-black text-emerald-600 font-mono">{inv.grandTotal || inv.grand_total} PKR</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <p className="text-center py-10 text-slate-400 text-xs">Search and select active patient record to construct POS billing items list.</p>
                 )}
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* --- EXPENSES & LEDGER VIEW --- */}
-        {activeTab === "expense" && userRole === "doctor" && (
-          <div className="space-y-8 animate-fadeIn">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block">OPD Income</span>
-                <h3 className="text-2xl font-black text-slate-900 mt-1">{autoOPDRevenue} <span className="text-xs font-medium text-slate-400">PKR</span></h3>
-                <p className="text-[10px] text-slate-400 mt-0.5">Calculated from checked queues</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-red-500">
-                <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block">Total Expenses</span>
-                <h3 className="text-2xl font-black text-slate-900 mt-1">{totalExpenses} <span className="text-xs font-medium text-slate-400">PKR</span></h3>
-                <p className="text-[10px] text-slate-400 mt-0.5">Sum of all daily recorded logs</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Other/Manual Income</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <input 
-                    type="number" 
-                    value={manualRevenue || ""} 
-                    onChange={(e) => setManualRevenue(Number(e.target.value))}
-                    placeholder="0" 
-                    className="w-full text-lg font-bold bg-slate-50 border border-slate-200 px-2 py-0.5 rounded focus:outline-none"
-                  />
-                  <span className="text-xs text-slate-400 font-bold">PKR</span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-0.5">Adjust manual/outside revenue</p>
-              </div>
-
-              <div className={`p-5 rounded-2xl border text-white shadow-md ${netProfit >= 0 ? "bg-gradient-to-br from-emerald-500 to-teal-600 border-emerald-500" : "bg-gradient-to-br from-rose-500 to-red-600 border-rose-500"}`}>
-                <span className="text-[10px] font-black uppercase tracking-widest block opacity-90">Net Profit</span>
-                <h3 className="text-3xl font-black mt-1">{netProfit} <span className="text-xs font-bold">PKR</span></h3>
-                <p className="text-[10px] opacity-80 mt-0.5">{netProfit >= 0 ? "🎉 Positive balance." : "⚠️ Deficit margins."}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">💸 Log New Expense</h3>
-                <form onSubmit={handleAddExpense} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expense Title *</label>
-                    <input type="text" value={expenseTitle} onChange={(e) => setExpenseTitle(e.target.value)} placeholder="e.g. Tea for staff, Paper bundles" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Amount (PKR) *</label>
-                      <input type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="e.g. 1500" className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date</label>
-                      <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-blue-500" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Category</label>
-                    <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white focus:outline-none" >
-                      <option value="Tea & Refreshments">Tea &amp; Refreshments</option>
-                      <option value="Staff Salaries">Staff Salaries</option>
-                      <option value="Clinic Rent">Clinic Rent</option>
-                      <option value="Utility Bills">Utility Bills</option>
-                      <option value="Stationery & Printing">Stationery &amp; Printing</option>
-                      <option value="Medicines Purchase">Medicines Purchase</option>
-                      <option value="Others">Others</option>
-                    </select>
-                  </div>
-
-                  <button type="submit" className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-md mt-2">📝 Save Expense</button>
-                </form>
-              </div>
-
+              {/* Right cart contents list and checkout operations */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-bold text-slate-900">📋 Expense Ledger</h3>
-                  <span className="text-xs bg-red-50 text-red-600 font-bold px-2.5 py-1 rounded-full">{expenses.length} Records</span>
-                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-4">🛒 Receipt checkout cart contents</h3>
 
-                {expenses.length === 0 ? (
-                  <div className="text-center py-16 border-2 border-dashed rounded-xl bg-slate-50/50 flex-1 flex flex-col items-center justify-center">
-                    <p className="text-2xl mb-1">🌿</p>
-                    <p className="text-sm font-semibold text-slate-400">No expenses recorded today.</p>
+                {billItems.length === 0 ? (
+                  <div className="text-center py-16 border-2 border-dashed border-slate-100 rounded-xl bg-slate-50/50 flex-1 flex flex-col items-center justify-center">
+                    <p className="text-2xl">🛒</p>
+                    <p className="text-xs text-slate-400 mt-2">Invoice checkout cart is currently empty.</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left border-collapse">
-                      <thead>
-                        <tr className="border-b font-bold text-slate-400">
-                          <th className="py-2.5">Date</th>
-                          <th>Title / Item</th>
-                          <th>Category</th>
-                          <th className="text-right">Amount</th>
-                          <th className="text-center">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y text-slate-700">
-                        {expenses.map(exp => (
-                          <tr key={exp.id} className="hover:bg-slate-50">
-                            <td className="py-3 font-medium text-slate-500">{new Date(exp.date).toLocaleDateString('en-GB')}</td>
-                            <td className="font-bold text-slate-800">{exp.title}</td>
-                            <td><span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-semibold text-[10px]">{exp.category}</span></td>
-                            <td className="text-right font-black text-slate-900 font-mono">{exp.amount} PKR</td>
-                            <td className="text-center"><button onClick={() => handleDeleteExpense(exp.id)} className="text-red-500 hover:text-red-700 font-bold hover:underline">Delete</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="flex-1 flex flex-col justify-between">
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                      {billItems.map(item => (
+                        <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs hover:bg-slate-100/50 transition-colors">
+                          <div className="flex-1">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase inline-block mb-1 ${item.type === 'OPD' ? 'bg-blue-100 text-blue-800' : item.type === 'Pharmacy' ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'}`}>{item.type}</span>
+                            <p className="font-extrabold text-slate-800">{item.name}</p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            {item.type === 'Pharmacy' ? (
+                              <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-0.5">
+                                <button onClick={() => handleQuantityChange(item.id, item.qty - 1)} className="font-bold text-slate-500 hover:text-slate-800">-</button>
+                                <span className="font-mono font-bold px-2">{item.qty}</span>
+                                <button onClick={() => handleQuantityChange(item.id, item.qty + 1)} className="font-bold text-slate-500 hover:text-slate-800">+</button>
+                              </div>
+                            ) : (
+                              <span className="font-medium text-slate-400">Qty: {item.qty}</span>
+                            )}
+                            <span className="font-mono font-extrabold text-slate-800 text-right w-16">{item.price * item.qty} PKR</span>
+                            <button onClick={() => handleRemoveBillItem(item.id)} className="text-red-500 hover:text-red-700 font-extrabold text-sm pl-2">×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-6 border-t border-slate-100 mt-6 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Invoice discount (PKR)</label>
+                          <input type="number" value={billDiscount || ''} onChange={(e) => setBillDiscount(parseFloat(e.target.value) || 0)} placeholder="0" className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs" />
+                        </div>
+                        <div className="text-right space-y-1">
+                          <p className="text-xs text-slate-400 font-semibold">Subtotal: <span className="font-mono text-slate-800 font-bold">{billItems.reduce((s, i) => s + (i.price * i.qty), 0)} PKR</span></p>
+                          <p className="text-xs text-slate-400 font-semibold">Discount: <span className="font-mono text-red-500 font-bold">-{billDiscount} PKR</span></p>
+                          <p className="text-sm font-black text-slate-900">Grand total: <span className="font-mono text-emerald-600 text-lg">{Math.max(0, billItems.reduce((s, i) => s + (i.price * i.qty), 0) - billDiscount)} PKR</span></p>
+                        </div>
+                      </div>
+
+                      <button onClick={handleCheckoutAndPrintReceipt} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl text-sm transition-colors shadow-md flex items-center justify-center gap-2">
+                        🖨️ Checkout Invoice &amp; Thermal Receipt print
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </div>
         )}
+
+        {/* Dynamic Expenses tracker tab */}
+        {activeTab === 'expenses' && userRole === 'Doctor' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Left Expense Adder */}
+            <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
+              <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                💸 Log operational Expense
+              </h3>
+              <form onSubmit={handleAddExpenseSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Expense Title / description *</label>
+                  <input type="text" value={expenseForm.title} onChange={(e) => setExpenseForm({...expenseForm, title: e.target.value})} placeholder="e.g. Tea for staff, Printing paper packs" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Amount (PKR) *</label>
+                    <input type="number" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: e.target.value})} placeholder="e.g. 1500" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" required />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Logged Date</label>
+                    <input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Expense Category</label>
+                  <select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none">
+                    <option>Tea &amp; Refreshments</option>
+                    <option>Clinic Utilities Bills</option>
+                    <option>Staff Salaries</option>
+                    <option>Clinic Rent</option>
+                    <option>Printing &amp; Stationery</option>
+                    <option>Medicines purchase Stock</option>
+                    <option>Miscellaneous operational Cost</option>
+                  </select>
+                </div>
+
+                <button type="submit" className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors shadow-md">
+                  Commit Expense transaction
+                </button>
+              </form>
+            </div>
+
+            {/* Right Expenses history lists */}
+            <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-base font-bold text-slate-900">📋 operational Expenses Ledger کھاتہ</h3>
+                <span className="text-xs bg-red-50 text-red-600 font-bold px-2.5 py-1 rounded-full">{expensesLedger.length} Records</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-slate-400 uppercase font-black text-[10px]">
+                      <th className="py-3 px-2">Transaction Date</th>
+                      <th className="py-3 px-2">Expense Details</th>
+                      <th className="py-3 px-2">Expense Category</th>
+                      <th className="py-3 px-2 text-right">Cost amount</th>
+                      <th className="py-3 px-2 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {expensesLedger.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-slate-400">No operational clinic expenses logged yet.</td>
+                      </tr>
+                    ) : (
+                      expensesLedger.map((exp) => (
+                        <tr key={exp.id} className="hover:bg-slate-50">
+                          <td className="py-3 px-2 font-medium text-slate-500">{exp.date}</td>
+                          <td className="py-3 px-2 font-bold text-slate-800">{exp.title}</td>
+                          <td className="py-3 px-2">
+                            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-semibold text-[10px]">{exp.category}</span>
+                          </td>
+                          <td className="py-3 px-2 text-right font-black text-slate-900">{exp.amount} PKR</td>
+                          <td className="py-3 px-2 text-center">
+                            <button onClick={() => handleDeleteExpense(exp.id || '')} className="text-red-500 hover:text-red-700 font-bold">Delete</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
+
+      {/* Footer copyright */}
+      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+        <p>© {new Date().getFullYear()} {clinicConfig.clinicName} ERP Systems. Built with precision &amp; live cloud synchronization.</p>
+      </footer>
     </div>
   );
 }
