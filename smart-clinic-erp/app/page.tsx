@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // Premium Inline Clinic Branding Config
@@ -192,7 +192,7 @@ export default function App() {
   const [billDiscount, setBillDiscount] = useState<number>(0);
   const [selectedPharmacyProduct, setSelectedPharmacyProduct] = useState<string>('');
   const [selectedLabTest, setSelectedLabTest] = useState<string>('Routine Urine Analysis');
-  const [customOpdFee, setCustomOpdFee] = useState<number>(clinicConfig.doctor.consultationFee);
+  const [customOpdFee, setCustomOpdFee] = useState<number>(0);
 
   // Expenses Forms
   const [expenseForm, setExpenseForm] = useState({ title: '', amount: '', category: 'Tea & Refreshments', date: '' });
@@ -311,21 +311,21 @@ export default function App() {
     // Realtime Token channel listener setup
     const tokenSubscription = supabase
       .channel('realtime_tokens_channel')
-      .on('postgres_changes', { event: '*', scheme: 'public', table: 'tokens' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tokens' }, () => {
         syncCloudDataToLocal();
       })
       .subscribe();
 
     const billingSubscription = supabase
       .channel('realtime_billing_channel')
-      .on('postgres_changes', { event: '*', scheme: 'public', table: 'billing_records' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_records' }, () => {
         syncCloudDataToLocal();
       })
       .subscribe();
 
     const stockSubscription = supabase
       .channel('realtime_stock_channel')
-      .on('postgres_changes', { event: '*', scheme: 'public', table: 'medicines' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicines' }, () => {
         syncCloudDataToLocal();
       })
       .subscribe();
@@ -422,7 +422,7 @@ export default function App() {
 
     // B. Queue up the active token
     const newToken: Token = {
-      tokenNumber,
+      tokenNumber: tokenCounter, // FIXED: Changed from 'tokenNumber' shorthand to 'tokenCounter' to resolve scope compilation issue
       pid: finalPid,
       name: patientForm.name,
       age: patientForm.age,
@@ -461,7 +461,7 @@ export default function App() {
     setPatientForm({ name: '', age: '', gender: 'Male', phone: '' });
     setVitalsForm({ bp: '', temp: '', weight: '' });
     setSelectedExistingPid(null);
-    triggerNotification(`🎟️ Issued Token #${tokenNumber} for PID: ${finalPid}`);
+    triggerNotification(`🎟️ Issued Token #${tokenCounter} for PID: ${finalPid}`);
   };
 
   const handleOpenExaminationDesk = (token: Token) => {
@@ -576,7 +576,7 @@ export default function App() {
             .sec-title { font-size: 14px; font-weight: bold; text-transform: uppercase; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin: 20px 0 8px 0; }
             .vitals-row { display: flex; gap: 15px; font-size: 12px; color: #475569; }
             .rx-symbol { font-size: 24px; font-weight: bold; color: #2563eb; font-family: serif; margin: 15px 0 5px 0; }
-            .med-list { font-family: monospace; font-size: 14px; white-space: pre-wrap; padding-left: 10px; }
+            .med-list { font-family: monospace; font-size: 14px; white-space: pre-wrap; padding-left: 10px; color: #1e293b; }
             .footer { position: fixed; bottom: 20px; left: 30px; right: 30px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; font-size: 11px; color: #94a3b8; }
           </style>
         </head>
@@ -747,20 +747,38 @@ export default function App() {
     setBillingPatient(p);
     setBillingSearchQuery('');
     setShowBillingSearchResults(false);
-    // Auto populate cart with basic consultation fee
-    setBillItems([{ id: 'OPD-FEE', name: 'OPD Consultation Fee', price: customOpdFee, type: 'OPD', qty: 1 }]);
+    
+    // Auto populate cart with basic consultation fee if they are a clinic patient
+    if (p.pid !== 'PID-WALKIN') {
+      setCustomOpdFee(clinicConfig.doctor.consultationFee);
+      setBillItems([{ id: 'OPD-FEE', name: 'OPD Consultation Fee', price: clinicConfig.doctor.consultationFee, type: 'OPD', qty: 1 }]);
+    } else {
+      setCustomOpdFee(0);
+      setBillItems([]);
+    }
   };
 
-  const handleAddPharmacyProductToBill = () => {
-    if (!selectedPharmacyProduct) return;
-    const med = medicinesStock.find(m => m.id === selectedPharmacyProduct);
+  const handleActivateWalkinCustomer = () => {
+    const walkinPatient: Patient = {
+      pid: 'PID-WALKIN',
+      name: 'Walk-in Customer',
+      age: 'N/A',
+      gender: 'N/A',
+      phone: 'N/A'
+    };
+    handleSelectBillingPatient(walkinPatient);
+    triggerNotification("🛍️ Walk-in General Mode activated!");
+  };
+
+  const handleAddPharmacyProductDirectly = (medId: string) => {
+    if (!medId) return;
+    const med = medicinesStock.find(m => m.id === medId);
     if (!med) return;
 
     if (med.stock <= 0) {
       return triggerNotification("❌ Product out of stock! Cannot allocate to bill.");
     }
 
-    // Check if product is already in our checkout cart
     const existingIndex = billItems.findIndex(item => item.id === med.id);
     if (existingIndex > -1) {
       const currentQty = billItems[existingIndex].qty;
@@ -773,11 +791,11 @@ export default function App() {
       setBillItems(prev => [...prev, { id: med.id, name: med.name, price, type: 'Pharmacy', qty: 1, maxQty: med.stock }]);
     }
     triggerNotification(`💊 Added ${med.name} to patient bill`);
+    setSelectedPharmacyProduct(''); // Reset select dropdown
   };
 
   const handleAddLabTestToBill = () => {
     if (!selectedLabTest) return;
-    // Map of common pricing structures
     const testPricing: { [key: string]: number } = {
       'CBC (Complete Blood Count)': 600,
       'Routine Urine Analysis': 300,
@@ -788,7 +806,6 @@ export default function App() {
     };
     const price = testPricing[selectedLabTest] || 500;
     
-    // Avoid double billing same diagnostic panel
     const existing = billItems.some(item => item.id === `LAB-${selectedLabTest}`);
     if (existing) return triggerNotification("⚠️ Test already listed on receipt.");
 
@@ -1140,7 +1157,6 @@ export default function App() {
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
         
-        {}
         {activeTab === 'dashboard' && userRole === 'Doctor' && (
           <div className="space-y-6">
             {/* Stats Cards Grid Layout */}
@@ -1749,15 +1765,24 @@ export default function App() {
               
               {/* Left Patient Selector and Billing items cart */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                <h3 className="text-base font-bold text-slate-900 mb-4">💵 POS Invoice Cart Generator</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-base font-bold text-slate-900">💵 POS Invoice Cart</h3>
+                  <button 
+                    onClick={handleActivateWalkinCustomer} 
+                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3 py-1.5 rounded-xl transition-all shadow-sm"
+                  >
+                    🛍️ Walk-In Mode (جنرل گاہک)
+                  </button>
+                </div>
 
+                {/* Patient Lookup search */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
-                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Search active patient files</span>
-                  <input type="text" value={billingSearchQuery} onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} placeholder="e.g. Muhammad, PID-1001" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Search Clinic Patient (optional)</span>
+                  <input type="text" value={billingSearchQuery} onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} placeholder="Type Patient Name or PID..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" />
                   {showBillingSearchResults && filteredBillingPatients.length > 0 && (
-                    <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
+                    <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto shadow-sm">
                       {filteredBillingPatients.map(p => (
-                        <div key={p.pid} onClick={() => handleSelectBillingPatient(p)} className="p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer font-bold text-emerald-600">
+                        <div key={p.pid} onClick={() => handleSelectBillingPatient(p)} className="p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer font-bold text-blue-600">
                           {p.name} ({p.pid})
                         </div>
                       ))}
@@ -1767,43 +1792,54 @@ export default function App() {
 
                 {billingPatient ? (
                   <div className="space-y-4">
-                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs space-y-1">
-                      <p className="font-extrabold text-emerald-900">Patient: {billingPatient.name}</p>
-                      <p className="text-emerald-700">Patient ID (PID): {billingPatient.pid}</p>
-                      <p className="text-emerald-700">Phone: {billingPatient.phone || 'N/A'}</p>
+                    <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200/50 text-xs space-y-1 relative">
+                      <p className="font-extrabold text-blue-900">Active Bill Mode: {billingPatient.name}</p>
+                      <p className="text-blue-700 font-mono font-bold">PID: {billingPatient.pid}</p>
+                      <p className="text-blue-600">Phone: {billingPatient.phone || 'N/A'}</p>
+                      <button 
+                        onClick={() => { setBillingPatient(null); setBillItems([]); }} 
+                        className="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-black text-sm"
+                      >
+                        ×
+                      </button>
                     </div>
 
                     {/* Custom OPD Fee adjustment */}
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Consultation OPD Fee amount (PKR)</label>
-                      <input 
-                        type="number" 
-                        value={customOpdFee} 
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setCustomOpdFee(val);
-                          setBillItems(prev => prev.map(item => item.id === 'OPD-FEE' ? { ...item, price: val } : item));
-                        }} 
-                        className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs"
-                      />
-                    </div>
+                    {billingPatient.pid !== 'PID-WALKIN' && (
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">OPD consultation fee (PKR)</label>
+                        <input 
+                          type="number" 
+                          value={customOpdFee} 
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setCustomOpdFee(val);
+                            setBillItems(prev => prev.map(item => item.id === 'OPD-FEE' ? { ...item, price: val } : item));
+                          }} 
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs"
+                        />
+                      </div>
+                    )}
 
                     <div className="pt-2 border-t border-slate-100 space-y-3">
                       <div>
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">🛒 Add Dispensing Pharmacy product</span>
-                        <div className="flex gap-2">
-                          <select value={selectedPharmacyProduct} onChange={(e) => setSelectedPharmacyProduct(e.target.value)} className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none">
-                            <option value="">-- Choose product --</option>
-                            {medicinesStock.map(m => (
-                              <option key={m.id} value={m.id}>{m.name} (Stock: {m.stock})</option>
-                            ))}
-                          </select>
-                          <button onClick={handleAddPharmacyProductToBill} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs">+</button>
-                        </div>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">⚡ Select Medicine to Add (ادویات منتخب کریں)</span>
+                        <select 
+                          value={selectedPharmacyProduct} 
+                          onChange={(e) => handleAddPharmacyProductDirectly(e.target.value)} 
+                          className="w-full px-3 py-2.5 border border-blue-200 focus:border-blue-500 rounded-xl text-xs bg-white font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        >
+                          <option value="">-- Choose and click to add instantly --</option>
+                          {medicinesStock.map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} — (Stock: {m.stock} left) — Price: {m.retailPrice ?? m.retail_price ?? 0} PKR
+                            </option>
+                          ))}
+                        </select>
                       </div>
 
                       <div>
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">🛒 Add Diagnostic Laboratory Tests</span>
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">⚡ Add Lab Investigation test</span>
                         <div className="flex gap-2">
                           <select value={selectedLabTest} onChange={(e) => setSelectedLabTest(e.target.value)} className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none">
                             <option>CBC (Complete Blood Count)</option>
@@ -1819,7 +1855,13 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-center py-10 text-slate-400 text-xs">Search and select active patient record to construct POS billing items list.</p>
+                  <div className="text-center py-10 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 p-4">
+                    <p className="text-2xl mb-1">👈</p>
+                    <p className="text-xs font-bold text-slate-500">How to add items?</p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Click the green <strong className="text-emerald-600">🛍️ Walk-In Mode</strong> button above, or search for an active patient profile to load the medicine selector!
+                    </p>
+                  </div>
                 )}
               </div>
 
