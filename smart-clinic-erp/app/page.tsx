@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Premium Inline Clinic Branding Config
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
@@ -23,7 +22,6 @@ const clinicConfig = {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-// Gracefully instantiate Supabase. If credentials are missing, system falls back to localStorage automatically.
 let supabase: any = null;
 if (supabaseUrl && supabaseAnonKey) {
   try {
@@ -46,7 +44,6 @@ interface Patient {
 interface Token {
   id?: string;
   tokenNumber: number;
-  token_number?: number; // DB mapping
   pid: string;
   name: string;
   age: string;
@@ -67,7 +64,6 @@ interface Visit {
   medicines: string;
   vitals: { bp: string; temp: string; weight: string };
   tokenNumber?: number;
-  token_number?: number;
   created_at?: string;
 }
 
@@ -75,12 +71,12 @@ interface Medicine {
   id: string;
   name: string;
   wholesalePrice?: number;
-  wholesale_price?: number; // DB mapping
+  wholesale_price?: number;
   retailPrice?: number;
-  retail_price?: number; // DB mapping
+  retail_price?: number;
   stock: number;
   minStockAlert?: number;
-  min_stock_alert?: number; // DB mapping
+  min_stock_alert?: number;
   created_at?: string;
 }
 
@@ -104,14 +100,11 @@ interface BillingRecord {
   patientName?: string;
   pid: string;
   opd_fee?: number;
-  opdFee?: number;
+  opd_total?: number;
   pharmacy_total?: number;
-  pharmacyTotal?: number;
   lab_total?: number;
-  labTotal?: number;
   discount: number;
   grand_total?: number;
-  grandTotal?: number;
   date: string;
   created_at?: string;
 }
@@ -128,19 +121,15 @@ interface Expense {
 export default function App() {
   const [mounted, setMounted] = useState(false);
   
-  // Security State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<'Doctor' | 'Receptionist' | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
-  // DB Sync Status Indicator
   const [syncStatus, setSyncStatus] = useState<'live' | 'local'>('local');
 
-  // Navigation controller
   const [activeTab, setActiveTab] = useState<'dashboard' | 'opd' | 'pharmacy' | 'lab' | 'billing' | 'expenses'>('dashboard');
 
-  // Unified Central DB States
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   const [visitsHistory, setVisitsHistory] = useState<Visit[]>([]);
   const [tokenQueue, setTokenQueue] = useState<Token[]>([]);
@@ -150,21 +139,17 @@ export default function App() {
   const [expensesLedger, setExpensesLedger] = useState<Expense[]>([]);
   const [tokenCounter, setTokenCounter] = useState(1);
 
-  // Notifications
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
-  // Forms states
   const [patientForm, setPatientForm] = useState({ name: '', age: '', gender: 'Male', phone: '' });
   const [vitalsForm, setVitalsForm] = useState({ bp: '', temp: '', weight: '' });
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
 
-  // Doctor checkup desk state
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
   const [prescriptionForm, setPrescriptionForm] = useState({ complaints: '', diagnosis: '', medicines: '' });
 
-  // Custom prescriptive shortcuts
   const [complaintsSuggestions, setComplaintsSuggestions] = useState<string[]>(["Fever", "Flu & Running Nose", "Dry Cough", "Body Ache", "High Blood Pressure", "Chest Tightness", "Diarrhea", "Stomach Pain"]);
   const [diagnosisSuggestions, setDiagnosisSuggestions] = useState<string[]>(["Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Gastroenteritis", "Essential Hypertension", "Bronchitis", "Enteric Fever"]);
   const [medicineTemplates, setMedicineTemplates] = useState<string[]>([
@@ -176,15 +161,12 @@ export default function App() {
   ]);
   const [customTemplateInput, setCustomTemplateInput] = useState('');
 
-  // Pharmacy Stock Forms
   const [medForm, setMedForm] = useState({ name: '', wholesalePrice: '', retailPrice: '', stock: '', minStockAlert: '20' });
 
-  // Laboratory Registry Forms
   const [labForm, setLabForm] = useState({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: '' });
   const [labSearchQuery, setLabSearchQuery] = useState('');
   const [showLabSearchResults, setShowLabSearchResults] = useState(false);
 
-  // Billing Engine Form & Checkout Cart
   const [billingSearchQuery, setBillingSearchQuery] = useState('');
   const [showBillingSearchResults, setShowBillingSearchResults] = useState(false);
   const [billingPatient, setBillingPatient] = useState<Patient | null>(null);
@@ -194,16 +176,13 @@ export default function App() {
   const [selectedLabTest, setSelectedLabTest] = useState<string>('Routine Urine Analysis');
   const [customOpdFee, setCustomOpdFee] = useState<number>(0);
 
-  // Expenses Forms
   const [expenseForm, setExpenseForm] = useState({ title: '', amount: '', category: 'Tea & Refreshments', date: '' });
 
   useEffect(() => {
     setMounted(true);
-    // Initialize date inputs
     setExpenseForm(prev => ({ ...prev, date: new Date().toISOString().split("T")[0] }));
     setLabForm(prev => ({ ...prev, date: new Date().toISOString().split("T")[0] }));
 
-    // Check pre-saved session keys to bypass PIN on refresh
     const savedRole = localStorage.getItem("sc_user_role");
     if (savedRole === "Doctor" || savedRole === "Receptionist") {
       setIsAuthenticated(true);
@@ -211,10 +190,7 @@ export default function App() {
       if (savedRole === "Receptionist") setActiveTab('opd');
     }
 
-    // Load initial fallback datasets
     loadLocalStoreFallbacks();
-
-    // Verify Cloud Engine Status
     testCloudSyncEngine();
   }, []);
 
@@ -251,7 +227,6 @@ export default function App() {
       return;
     }
     try {
-      // Perform diagnostic checks against Patients ledger
       const { data, error } = await supabase.from('patients').select('id').limit(1);
       if (error) throw error;
       setSyncStatus('live');
@@ -275,7 +250,6 @@ export default function App() {
 
       if (pt) { setPatientsList(pt); localStorage.setItem("sc_patients", JSON.stringify(pt)); }
       if (tk) {
-        // Map raw DB snake_case formats to model structures safely
         const formattedTokens: Token[] = tk.map((t: any) => ({
           id: t.id,
           tokenNumber: t.token_number ?? t.tokenNumber,
@@ -308,7 +282,6 @@ export default function App() {
   useEffect(() => {
     if (!supabase || syncStatus !== 'live') return;
 
-    // Realtime Token channel listener setup
     const tokenSubscription = supabase
       .channel('realtime_tokens_channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tokens' }, () => {
@@ -337,7 +310,6 @@ export default function App() {
     };
   }, [syncStatus]);
 
-  // Handle local changes preservation
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem("sc_custom_templates", JSON.stringify(medicineTemplates));
@@ -352,7 +324,7 @@ export default function App() {
       setUserRole('Doctor');
       localStorage.setItem("sc_user_role", "Doctor");
       setActiveTab('dashboard');
-      triggerNotification("👨‍⚕️ Welcome Doctor Mohsin Shahzad!");
+      triggerNotification(`👨‍⚕️ Welcome ${clinicConfig.doctor.name}!`);
     } else if (pinInput === "1122") {
       setIsAuthenticated(true);
       setUserRole('Receptionist');
@@ -396,7 +368,6 @@ export default function App() {
 
     let finalPid = selectedExistingPid;
 
-    // A. Generate and preserve patient profile if they are brand new
     if (!finalPid) {
       const generatedNumber = 1001 + patientsList.length;
       finalPid = `PID-${generatedNumber}`;
@@ -420,9 +391,8 @@ export default function App() {
       localStorage.setItem("sc_patients", JSON.stringify([newPatient, ...currentLocalPatients]));
     }
 
-    // B. Queue up the active token
     const newToken: Token = {
-      tokenNumber: tokenCounter, // FIXED: Changed from 'tokenNumber' shorthand to 'tokenCounter' to resolve scope compilation issue
+      tokenNumber: tokenCounter, 
       pid: finalPid,
       name: patientForm.name,
       age: patientForm.age,
@@ -457,7 +427,6 @@ export default function App() {
     setTokenCounter(nextCounter);
     localStorage.setItem("sc_token_counter", nextCounter.toString());
 
-    // Flush fields
     setPatientForm({ name: '', age: '', gender: 'Male', phone: '' });
     setVitalsForm({ bp: '', temp: '', weight: '' });
     setSelectedExistingPid(null);
@@ -485,7 +454,7 @@ export default function App() {
     setPrescriptionForm(prev => {
       const lines = prev.medicines.trim() ? prev.medicines.split('\n') : [];
       const nextNum = lines.length + 1;
-      const cleanMed = med.replace(/^\d+\.\s*/, ''); // strip leading numbers if exist
+      const cleanMed = med.replace(/^\d+\.\s*/, ''); 
       const lineToAdd = `${nextNum}. ${cleanMed}`;
       const updated = prev.medicines.trim() ? `${prev.medicines}\n${lineToAdd}` : lineToAdd;
       return { ...prev, medicines: updated };
@@ -527,7 +496,6 @@ export default function App() {
       tokenNumber: selectedToken.tokenNumber
     };
 
-    // A. Commit visit checkup record to databases
     if (syncStatus === 'live' && supabase) {
       try {
         await supabase.from('visits').insert([{
@@ -541,7 +509,6 @@ export default function App() {
           token_number: formattedVisit.tokenNumber
         }]);
 
-        // Evict token from active cloud pool
         await supabase.from('tokens').delete().eq('pid', selectedToken.pid).eq('token_number', selectedToken.tokenNumber);
       } catch (err) {
         console.error("Cloud saving visit failed", err);
@@ -556,7 +523,6 @@ export default function App() {
     const currentLocalTokens = JSON.parse(localStorage.getItem("sc_tokens") || "[]");
     localStorage.setItem("sc_tokens", JSON.stringify(currentLocalTokens.filter((t: any) => t.pid !== selectedToken.pid)));
 
-    // B. Build and dispatch print container window
     const win = window.open('', '_blank');
     if (!win) {
       return triggerNotification("⚠️ Please allow popups for prescription printing");
@@ -748,7 +714,6 @@ export default function App() {
     setBillingSearchQuery('');
     setShowBillingSearchResults(false);
     
-    // Auto populate cart with basic consultation fee if they are a clinic patient
     if (p.pid !== 'PID-WALKIN') {
       setCustomOpdFee(clinicConfig.doctor.consultationFee);
       setBillItems([{ id: 'OPD-FEE', name: 'OPD Consultation Fee', price: clinicConfig.doctor.consultationFee, type: 'OPD', qty: 1 }]);
@@ -791,7 +756,7 @@ export default function App() {
       setBillItems(prev => [...prev, { id: med.id, name: med.name, price, type: 'Pharmacy', qty: 1, maxQty: med.stock }]);
     }
     triggerNotification(`💊 Added ${med.name} to patient bill`);
-    setSelectedPharmacyProduct(''); // Reset select dropdown
+    setSelectedPharmacyProduct(''); 
   };
 
   const handleAddLabTestToBill = () => {
@@ -840,19 +805,14 @@ export default function App() {
       patientName: billingPatient.name,
       patient_name: billingPatient.name,
       pid: billingPatient.pid,
-      opdFee: opdSum,
       opd_fee: opdSum,
-      pharmacyTotal: pharmSum,
       pharmacy_total: pharmSum,
-      labTotal: labSum,
       lab_total: labSum,
       discount: billDiscount,
-      grandTotal: finalTotal,
       grand_total: finalTotal,
       date: new Date().toLocaleDateString('en-GB')
     };
 
-    // A. Commit billing ledger entry to database
     if (syncStatus === 'live' && supabase) {
       try {
         await supabase.from('billing_records').insert([receipt]);
@@ -865,7 +825,6 @@ export default function App() {
     const currentLocalBills = JSON.parse(localStorage.getItem("sc_bills") || "[]");
     localStorage.setItem("sc_bills", JSON.stringify([receipt, ...currentLocalBills]));
 
-    // B. AUTO-DEDUCT PHARMACY STOCK LEVEL METRICS
     const updatedMedsStock = [...medicinesStock];
     const pharmacyItemsToDeduct = billItems.filter(item => item.type === 'Pharmacy');
 
@@ -877,7 +836,6 @@ export default function App() {
         const nextStock = Math.max(0, initialStock - targetDeduction);
         updatedMedsStock[idx].stock = nextStock;
 
-        // Perform Cloud Stock Update
         if (syncStatus === 'live' && supabase) {
           try {
             await supabase.from('medicines').update({ stock: nextStock }).eq('id', item.id);
@@ -890,7 +848,6 @@ export default function App() {
     setMedicinesStock(updatedMedsStock);
     localStorage.setItem("sc_medicines", JSON.stringify(updatedMedsStock));
 
-    // C. Launch Printer Interface Window
     const win = window.open('', '_blank');
     if (!win) {
       return triggerNotification("⚠️ Please allow popups to output invoices");
@@ -979,7 +936,6 @@ export default function App() {
     win.document.write(receiptHTML);
     win.document.close();
 
-    // Reset Form states
     setBillingPatient(null);
     setBillItems([]);
     setBillDiscount(0);
@@ -1030,10 +986,10 @@ export default function App() {
     triggerNotification("🗑️ Expense row deleted.");
   };
 
-  const totalOpdEarnings = billingRecords.reduce((sum, item) => sum + (item.opdFee ?? item.opd_fee ?? 0), 0);
-  const totalPharmEarnings = billingRecords.reduce((sum, item) => sum + (item.pharmacyTotal ?? item.pharmacy_total ?? 0), 0);
-  const totalLabEarnings = billingRecords.reduce((sum, item) => sum + (item.labTotal ?? item.lab_total ?? 0), 0);
-  const totalGrossEarnings = billingRecords.reduce((sum, item) => sum + (item.grandTotal ?? item.grand_total ?? 0), 0);
+  const totalOpdEarnings = billingRecords.reduce((sum, item) => sum + (item.opd_fee || 0), 0);
+  const totalPharmEarnings = billingRecords.reduce((sum, item) => sum + (item.pharmacy_total || 0), 0);
+  const totalLabEarnings = billingRecords.reduce((sum, item) => sum + (item.lab_total || 0), 0);
+  const totalGrossEarnings = billingRecords.reduce((sum, item) => sum + (item.grand_total || 0), 0);
   const totalExpensesLogged = expensesLedger.reduce((sum, item) => sum + item.amount, 0);
   const totalNetClinicProfit = totalGrossEarnings - totalExpensesLogged;
 
@@ -1085,7 +1041,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
-      {/* Top Header Navigation Panel */}
+      {}
       <header className="bg-slate-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -1097,7 +1053,6 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Supabase status display */}
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${syncStatus === 'live' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
               <span className={`w-2 h-2 rounded-full ${syncStatus === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
               {syncStatus === 'live' ? 'Live Cloud Sync' : 'Local Storage Fallback'}
@@ -1127,7 +1082,7 @@ export default function App() {
           </button>
           {userRole === 'Doctor' && (
             <button onClick={() => setActiveTab('pharmacy')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'pharmacy' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-              💊 Pharmacy stock
+              💊 Pharmacy Stock
             </button>
           )}
           {userRole === 'Doctor' && (
@@ -1146,7 +1101,7 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Global alert banner notifications */}
+      {/* Global Toast Alerts */}
       {alertMessage && (
         <div className="fixed bottom-4 right-4 z-50 bg-slate-900 border border-slate-700 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce">
           <span className="text-lg">🔔</span>
@@ -1159,7 +1114,6 @@ export default function App() {
         
         {activeTab === 'dashboard' && userRole === 'Doctor' && (
           <div className="space-y-6">
-            {/* Stats Cards Grid Layout */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                 <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-xl">👥</div>
@@ -1194,9 +1148,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Double Column Detailed Analytics Panels */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Financial Summary */}
               <div className="lg:col-span-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">💵 Revenue Breakdown</h3>
                 <div className="space-y-3 text-xs">
@@ -1227,7 +1179,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Patient Visits Overview */}
               <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
                 <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">📜 Recent Patient Visits Log</h3>
                 <div className="flex-1 overflow-y-auto max-h-[220px] space-y-2 pr-1">
@@ -1253,11 +1204,9 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic OPD & Registration tabs */}
+        {/* Dynamic OPD & Registration tab */}
         {activeTab === 'opd' && (
           <div className="space-y-6">
-            
-            {/* Quick Search */}
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
               <h4 className="text-sm font-bold mb-1 flex items-center gap-1.5">
                 🔍 Returning Patient Profile Quick Search
@@ -1297,7 +1246,6 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Left Patient Form Card */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -1364,7 +1312,6 @@ export default function App() {
                 </form>
               </div>
 
-              {/* Right Live Active Token Queue Card */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -1421,7 +1368,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* EHR Doctor Consultation desk layout */}
+            {/* EHR Doctor Consultation Desk layout */}
             {selectedToken && userRole === 'Doctor' && (
               <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all mt-6">
                 <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
@@ -1439,11 +1386,10 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-x divide-slate-200">
-                  {/* Left demographics and visit timelines */}
                   <div className="lg:col-span-3 bg-slate-50 p-5 flex flex-col h-[520px]">
                     <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-2 mb-4">
                       <h4 className="font-extrabold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex justify-between items-center">
-                        <span>Profile info</span>
+                        <span>Profile Info</span>
                         <span className="text-blue-600 font-black">{selectedToken.pid}</span>
                       </h4>
                       <p><strong className="text-slate-500">Gender/Age:</strong> {selectedToken.gender}, {selectedToken.age} Years</p>
@@ -1456,7 +1402,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* EHR Medical History Timeline */}
                     <div className="flex-1 flex flex-col min-h-0">
                       <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
                         <span>📜 Medical Timeline History</span>
@@ -1493,7 +1438,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Middle Checkup Prescription Builder */}
                   <div className="lg:col-span-5 p-5 space-y-4">
                     <div className="grid grid-cols-1 gap-3">
                       <div>
@@ -1518,7 +1462,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Right Smart Shortcuts suggests */}
                   <div className="lg:col-span-4 bg-slate-50 p-5 overflow-y-auto h-[520px] space-y-4">
                     <div>
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">⚡ Symptom Shortcuts</span>
@@ -1571,7 +1514,6 @@ export default function App() {
         {/* Dynamic Pharmacy Stock Panel */}
         {activeTab === 'pharmacy' && userRole === 'Doctor' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Stock Adder */}
             <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
               <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
                 💊 Add Inventory stock
@@ -1610,7 +1552,6 @@ export default function App() {
               </form>
             </div>
 
-            {/* Right Stock Ledger list */}
             <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-base font-bold text-slate-900">📦 Medicines Inventory Stock Ledger</h3>
@@ -1643,7 +1584,7 @@ export default function App() {
                             <td className="py-3 px-2 text-right font-mono text-emerald-600 font-bold">{m.retailPrice ?? m.retail_price ?? 0} PKR</td>
                             <td className="py-3 px-2 text-center">
                               <span className={`px-2.5 py-1 rounded-full text-[11px] font-black font-mono ${m.stock <= minAlert ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-slate-100 text-slate-700'}`}>
-                                {m.stock} {m.stock <= minAlert ? '⚠️ LOW STOCK' : ''}
+                                {m.stock} {m.stock <= minAlert ? '⚠️ LOW' : ''}
                               </span>
                             </td>
                             <td className="py-3 px-2 text-center">
@@ -1664,7 +1605,6 @@ export default function App() {
         {activeTab === 'lab' && userRole === 'Doctor' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Left Test adder */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
                   🔬 Laboratory test Registry
@@ -1672,7 +1612,7 @@ export default function App() {
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Patient Search Database</span>
-                  <input type="text" value={labSearchQuery} onChange={(e) => { setLabSearchQuery(e.target.value); setShowLabSearchResults(true); }} placeholder="Type patient name or PID" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
+                  <input type="text" value={labSearchQuery} onChange={(e) => { labSearchQuery = e.target.value; setShowLabSearchResults(true); }} placeholder="Type patient name or PID" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
                   {showLabSearchResults && filteredLabPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
                       {filteredLabPatients.map(p => (
@@ -1715,7 +1655,6 @@ export default function App() {
                 </form>
               </div>
 
-              {/* Right Diagnostic History Registry */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
                 <h3 className="text-base font-bold text-slate-900 mb-4">🔬 Patient Diagnostics Laboratory Ledger</h3>
                 <div className="overflow-x-auto">
@@ -1763,7 +1702,6 @@ export default function App() {
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
-              {/* Left Patient Selector and Billing items cart */}
               <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-base font-bold text-slate-900">💵 POS Invoice Cart</h3>
@@ -1775,10 +1713,9 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Patient Lookup search */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Search Clinic Patient (optional)</span>
-                  <input type="text" value={billingSearchQuery} onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} placeholder="Type Patient Name or PID..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" />
+                  <input type="text" value={billingSearchQuery} onChange={(e) => { billingSearchQuery = e.target.value; setShowBillingSearchResults(true); }} placeholder="Type Patient Name or PID..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" />
                   {showBillingSearchResults && filteredBillingPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto shadow-sm">
                       {filteredBillingPatients.map(p => (
@@ -1804,7 +1741,6 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* Custom OPD Fee adjustment */}
                     {billingPatient.pid !== 'PID-WALKIN' && (
                       <div>
                         <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">OPD consultation fee (PKR)</label>
@@ -1865,7 +1801,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Right cart contents list and checkout operations */}
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
                 <h3 className="text-base font-bold text-slate-900 mb-4">🛒 Receipt checkout cart contents</h3>
 
@@ -1927,7 +1862,6 @@ export default function App() {
         {/* Dynamic Expenses tracker tab */}
         {activeTab === 'expenses' && userRole === 'Doctor' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Expense Adder */}
             <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
               <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
                 💸 Log operational Expense
@@ -1968,7 +1902,6 @@ export default function App() {
               </form>
             </div>
 
-            {/* Right Expenses history lists */}
             <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-base font-bold text-slate-900">📋 operational Expenses Ledger کھاتہ</h3>
