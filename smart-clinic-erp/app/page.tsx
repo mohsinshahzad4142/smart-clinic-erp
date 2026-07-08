@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
+// Premium Multitenant / Clinic Branding Configuration
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
@@ -19,6 +20,7 @@ const clinicConfig = {
   }
 };
 
+// Supabase Connection Settings
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -31,6 +33,7 @@ if (supabaseUrl && supabaseAnonKey) {
   }
 }
 
+// Interfaces Definition
 interface Patient {
   id?: string;
   pid: string;
@@ -121,15 +124,19 @@ interface Expense {
 export default function App() {
   const [mounted, setMounted] = useState(false);
   
+  // Security Portal Access State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<'Doctor' | 'Receptionist' | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
+  // Live Database Synchronisation Indicator
   const [syncStatus, setSyncStatus] = useState<'live' | 'local'>('local');
 
+  // Tabs Control
   const [activeTab, setActiveTab] = useState<'dashboard' | 'opd' | 'pharmacy' | 'lab' | 'billing' | 'expenses'>('dashboard');
 
+  // Unified States Ledger
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   const [visitsHistory, setVisitsHistory] = useState<Visit[]>([]);
   const [tokenQueue, setTokenQueue] = useState<Token[]>([]);
@@ -139,10 +146,14 @@ export default function App() {
   const [expensesLedger, setExpensesLedger] = useState<Expense[]>([]);
   const [tokenCounter, setTokenCounter] = useState(1);
 
+  // Notifications state
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
+  // Forms Binding
   const [patientForm, setPatientForm] = useState({ name: '', age: '', gender: 'Male', phone: '' });
   const [vitalsForm, setVitalsForm] = useState({ bp: '', temp: '', weight: '' });
+  
+  // States to avoid const reassignment errors (Fixed)
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
@@ -150,6 +161,7 @@ export default function App() {
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
   const [prescriptionForm, setPrescriptionForm] = useState({ complaints: '', diagnosis: '', medicines: '' });
 
+  // EHR Auto-Suggest Templates
   const [complaintsSuggestions, setComplaintsSuggestions] = useState<string[]>(["Fever", "Flu & Running Nose", "Dry Cough", "Body Ache", "High Blood Pressure", "Chest Tightness", "Diarrhea", "Stomach Pain"]);
   const [diagnosisSuggestions, setDiagnosisSuggestions] = useState<string[]>(["Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Gastroenteritis", "Essential Hypertension", "Bronchitis", "Enteric Fever"]);
   const [medicineTemplates, setMedicineTemplates] = useState<string[]>([
@@ -161,12 +173,17 @@ export default function App() {
   ]);
   const [customTemplateInput, setCustomTemplateInput] = useState('');
 
+  // Pharmacy & Stocks form binding
   const [medForm, setMedForm] = useState({ name: '', wholesalePrice: '', retailPrice: '', stock: '', minStockAlert: '20' });
 
+  // Labs form state
   const [labForm, setLabForm] = useState({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: '' });
+  
+  // Safe state mapping for search inputs (Fixed const reassignment issues)
   const [labSearchQuery, setLabSearchQuery] = useState('');
   const [showLabSearchResults, setShowLabSearchResults] = useState(false);
 
+  // Billing inputs
   const [billingSearchQuery, setBillingSearchQuery] = useState('');
   const [showBillingSearchResults, setShowBillingSearchResults] = useState(false);
   const [billingPatient, setBillingPatient] = useState<Patient | null>(null);
@@ -176,6 +193,7 @@ export default function App() {
   const [selectedLabTest, setSelectedLabTest] = useState<string>('Routine Urine Analysis');
   const [customOpdFee, setCustomOpdFee] = useState<number>(0);
 
+  // Operational Expenses form
   const [expenseForm, setExpenseForm] = useState({ title: '', amount: '', category: 'Tea & Refreshments', date: '' });
 
   useEffect(() => {
@@ -194,11 +212,13 @@ export default function App() {
     testCloudSyncEngine();
   }, []);
 
+  // Helper trigger
   const triggerNotification = (msg: string) => {
     setAlertMessage(msg);
     setTimeout(() => setAlertMessage(null), 4000);
   };
 
+  // Local storage mapping
   const loadLocalStoreFallbacks = () => {
     const rawPatients = localStorage.getItem("sc_patients");
     const rawVisits = localStorage.getItem("sc_visits");
@@ -221,6 +241,7 @@ export default function App() {
     if (rawCustomSugg) setMedicineTemplates(JSON.parse(rawCustomSugg));
   };
 
+  // Connection testing diagnostics
   const testCloudSyncEngine = async () => {
     if (!supabase) {
       setSyncStatus('local');
@@ -237,6 +258,7 @@ export default function App() {
     }
   };
 
+  // Background Cloud Sync Pull
   const syncCloudDataToLocal = async () => {
     if (!supabase) return;
     try {
@@ -279,6 +301,7 @@ export default function App() {
     }
   };
 
+  // Real-time PostgreSQL subscription channels
   useEffect(() => {
     if (!supabase || syncStatus !== 'live') return;
 
@@ -315,6 +338,7 @@ export default function App() {
     localStorage.setItem("sc_custom_templates", JSON.stringify(medicineTemplates));
   }, [medicineTemplates, mounted]);
 
+  // Auth processing
   const handleSecurityPinLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setPinError('');
@@ -1041,7 +1065,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
-      {}
+      {/* Main Header */}
       <header className="bg-slate-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -1069,8 +1093,28 @@ export default function App() {
         </div>
       </header>
 
+      {/* Persistent Beautiful Clinic & Doctor Branding Banner */}
+      <div className="bg-white border-b border-slate-200 py-3.5 px-4 md:px-6 shadow-sm">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-lg md:text-xl font-black text-slate-800 flex items-center gap-2">
+              🏥 {clinicConfig.clinicName}
+            </h2>
+            <p className="text-xs text-slate-500 font-semibold mt-0.5">📍 Address: {clinicConfig.contact.address}</p>
+          </div>
+          <div className="bg-blue-50/70 border border-blue-100 p-3 rounded-xl flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-2xl">👨‍⚕️</span>
+            <div>
+              <h3 className="text-xs font-black text-slate-900">{clinicConfig.doctor.name}</h3>
+              <p className="text-[11px] text-blue-600 font-bold">{clinicConfig.doctor.degree} — {clinicConfig.doctor.specialty}</p>
+              <p className="text-[10px] text-slate-400 font-semibold mt-0.5">📞 Helpline: {clinicConfig.contact.phone}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Tabs Switcher Panel */}
-      <nav className="bg-white border-b border-slate-200">
+      <nav className="bg-white border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 flex overflow-x-auto gap-1">
           {userRole === 'Doctor' && (
             <button onClick={() => setActiveTab('dashboard')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'dashboard' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
@@ -1091,7 +1135,7 @@ export default function App() {
             </button>
           )}
           <button onClick={() => setActiveTab('billing')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'billing' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-            💵 POS Checkout & Billing
+            💵 POS Checkout &amp; Billing
           </button>
           {userRole === 'Doctor' && (
             <button onClick={() => setActiveTab('expenses')} className={`py-3 px-4 font-bold text-xs whitespace-nowrap transition-all border-b-2 ${activeTab === 'expenses' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
@@ -1112,6 +1156,7 @@ export default function App() {
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
         
+        {/* TAB: DASHBOARD */}
         {activeTab === 'dashboard' && userRole === 'Doctor' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1204,7 +1249,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic OPD & Registration tab */}
+        {/* TAB: OPD QUEUE */}
         {activeTab === 'opd' && (
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
@@ -1511,7 +1556,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic Pharmacy Stock Panel */}
+        {/* TAB: PHARMACY STOCK */}
         {activeTab === 'pharmacy' && userRole === 'Doctor' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
@@ -1601,7 +1646,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic Diagnostics Lab tabs */}
+        {/* TAB: DIAGNOSTICS LAB */}
         {activeTab === 'lab' && userRole === 'Doctor' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1612,7 +1657,13 @@ export default function App() {
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Patient Search Database</span>
-                  <input type="text" value={labSearchQuery} onChange={(e) => { setLabSearchQuery(e.target.value); setShowLabSearchResults(true); }} placeholder="Type patient name or PID" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none" />
+                  <input 
+                    type="text" 
+                    value={labSearchQuery} 
+                    onChange={(e) => { setLabSearchQuery(e.target.value); setShowLabSearchResults(true); }} 
+                    placeholder="Type patient name or PID" 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" 
+                  />
                   {showLabSearchResults && filteredLabPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
                       {filteredLabPatients.map(p => (
@@ -1697,7 +1748,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic POS Checkout & Billing panels */}
+        {/* TAB: POS CHECKOUT & BILLING */}
         {activeTab === 'billing' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1715,7 +1766,13 @@ export default function App() {
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs mb-4">
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Search Clinic Patient (optional)</span>
-                  <input type="text" value={billingSearchQuery} onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} placeholder="Type Patient Name or PID..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" />
+                  <input 
+                    type="text" 
+                    value={billingSearchQuery} 
+                    onChange={(e) => { setBillingSearchQuery(e.target.value); setShowBillingSearchResults(true); }} 
+                    placeholder="Type Patient Name or PID..." 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none bg-white" 
+                  />
                   {showBillingSearchResults && filteredBillingPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto shadow-sm">
                       {filteredBillingPatients.map(p => (
@@ -1752,7 +1809,7 @@ export default function App() {
                             setCustomOpdFee(val);
                             setBillItems(prev => prev.map(item => item.id === 'OPD-FEE' ? { ...item, price: val } : item));
                           }} 
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs"
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white"
                         />
                       </div>
                     )}
@@ -1839,7 +1896,7 @@ export default function App() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Invoice discount (PKR)</label>
-                          <input type="number" value={billDiscount || ''} onChange={(e) => setBillDiscount(parseFloat(e.target.value) || 0)} placeholder="0" className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs" />
+                          <input type="number" value={billDiscount || ''} onChange={(e) => setBillDiscount(parseFloat(e.target.value) || 0)} placeholder="0" className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white" />
                         </div>
                         <div className="text-right space-y-1">
                           <p className="text-xs text-slate-400 font-semibold">Subtotal: <span className="font-mono text-slate-800 font-bold">{billItems.reduce((s, i) => s + (i.price * i.qty), 0)} PKR</span></p>
@@ -1859,7 +1916,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic Expenses tracker tab */}
+        {/* TAB: EXPENSES LEDGER */}
         {activeTab === 'expenses' && userRole === 'Doctor' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
@@ -1948,7 +2005,7 @@ export default function App() {
 
       </main>
 
-      {/* Footer copyright */}
+      {/* Footer Copyright */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
         <p>© {new Date().getFullYear()} {clinicConfig.clinicName} ERP Systems. Built with precision &amp; live cloud synchronization.</p>
       </footer>
