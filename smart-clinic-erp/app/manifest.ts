@@ -12,13 +12,13 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#0f172a',
     icons: [
       {
-        src: 'https://cdn-icons-png.flaticon.com/192/192/192401.png',
+        src: 'https://img.icons8.com/fluency/192/hospital-room.png',
         sizes: '192x192',
         type: 'image/png',
         purpose: 'any'
       },
       {
-        src: 'https://cdn-icons-png.flaticon.com/512/512/512401.png',
+        src: 'https://img.icons8.com/fluency/512/hospital-room.png',
         sizes: '512x512',
         type: 'image/png',
         purpose: 'any'
