@@ -130,6 +130,10 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
+  // PWA Dynamic Install Prompt States
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
+
   // Live Database Synchronisation Indicator
   const [syncStatus, setSyncStatus] = useState<'live' | 'local'>('local');
 
@@ -153,7 +157,7 @@ export default function App() {
   const [patientForm, setPatientForm] = useState({ name: '', age: '', gender: 'Male', phone: '' });
   const [vitalsForm, setVitalsForm] = useState({ bp: '', temp: '', weight: '' });
   
-  // States to avoid const reassignment errors (Fixed)
+  // States to avoid const reassignment errors
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
@@ -179,7 +183,7 @@ export default function App() {
   // Labs form state
   const [labForm, setLabForm] = useState({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: '' });
   
-  // Safe state mapping for search inputs (Fixed const reassignment issues)
+  // Safe state mapping for search inputs
   const [labSearchQuery, setLabSearchQuery] = useState('');
   const [showLabSearchResults, setShowLabSearchResults] = useState(false);
 
@@ -210,6 +214,28 @@ export default function App() {
 
     loadLocalStoreFallbacks();
     testCloudSyncEngine();
+
+    // 🟢 Register PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then((reg) => console.log('🟢 PWA Service Worker Registered Successfully on Scope:', reg.scope))
+          .catch((err) => console.warn('🔴 PWA Service Worker Registration Failed:', err));
+      });
+    }
+
+    // 🟢 Capture PWA BeforeInstallPrompt Event
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
   }, []);
 
   // Helper trigger
@@ -366,6 +392,18 @@ export default function App() {
     setUserRole(null);
     localStorage.removeItem("sc_user_role");
     setPinInput('');
+  };
+
+  // PWA Prompt trigger click
+  const handleInstallAppClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      triggerNotification("🎉 Smart Clinic ERP successfully installed on your desktop!");
+    }
+    setDeferredPrompt(null);
+    setShowInstallBtn(false);
   };
 
   const filteredPatients = searchQuery.trim() === ""
@@ -1077,6 +1115,16 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* 📥 PWA App Installation Button */}
+            {showInstallBtn && (
+              <button 
+                onClick={handleInstallAppClick}
+                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 animate-pulse border border-emerald-400 shadow-md shadow-emerald-500/10"
+              >
+                📥 Install App (ڈیسک ٹاپ ایپ بنائیں)
+              </button>
+            )}
+
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${syncStatus === 'live' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
               <span className={`w-2 h-2 rounded-full ${syncStatus === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
               {syncStatus === 'live' ? 'Live Cloud Sync' : 'Local Storage Fallback'}
@@ -2007,7 +2055,7 @@ export default function App() {
 
       {/* Footer Copyright */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
-        <p>© {new Date().getFullYear()} {clinicConfig.clinicName} ERP Systems. Built with precision &amp; live cloud synchronization.</p>
+        <p>© {new Date().getFullYear()} {clinicConfig.clinicName} ERP Systems. Built with precision &amp; live PWA desktop app installation.</p>
       </footer>
     </div>
   );
