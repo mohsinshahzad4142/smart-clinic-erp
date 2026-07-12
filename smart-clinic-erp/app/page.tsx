@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Premium Multitenant / Clinic Branding Configuration
+// پریمیم کلینک برانڈنگ کنفیگریشن جو ہر جگہ استعمال ہوگی
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
@@ -20,7 +20,7 @@ const clinicConfig = {
   }
 };
 
-// Supabase Connection Settings
+// سپابیس کنکشن سیٹنگز کلاؤڈ لائیو سنک کے لیے
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -33,7 +33,6 @@ if (supabaseUrl && supabaseAnonKey) {
   }
 }
 
-// Interfaces Definition
 interface Patient {
   id?: string;
   pid: string;
@@ -124,23 +123,19 @@ interface Expense {
 export default function App() {
   const [mounted, setMounted] = useState(false);
   
-  // Security Portal Access State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<'Doctor' | 'Receptionist' | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
-  // PWA Dynamic Install Prompt States
+  // پی ڈبلیو اے ایپ انسٹال کرنے کے ڈائنامک اشارے
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
 
-  // Live Database Synchronisation Indicator
+  // لائیو ڈیٹا بیس کنکشن انڈیکیٹر
   const [syncStatus, setSyncStatus] = useState<'live' | 'local'>('local');
-
-  // Tabs Control
   const [activeTab, setActiveTab] = useState<'dashboard' | 'opd' | 'pharmacy' | 'lab' | 'billing' | 'expenses'>('dashboard');
 
-  // Unified States Ledger
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   const [visitsHistory, setVisitsHistory] = useState<Visit[]>([]);
   const [tokenQueue, setTokenQueue] = useState<Token[]>([]);
@@ -150,14 +145,11 @@ export default function App() {
   const [expensesLedger, setExpensesLedger] = useState<Expense[]>([]);
   const [tokenCounter, setTokenCounter] = useState(1);
 
-  // Notifications state
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
-  // Forms Binding
   const [patientForm, setPatientForm] = useState({ name: '', age: '', gender: 'Male', phone: '' });
   const [vitalsForm, setVitalsForm] = useState({ bp: '', temp: '', weight: '' });
   
-  // States to avoid const reassignment errors
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [selectedExistingPid, setSelectedExistingPid] = useState<string | null>(null);
@@ -165,9 +157,9 @@ export default function App() {
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
   const [prescriptionForm, setPrescriptionForm] = useState({ complaints: '', diagnosis: '', medicines: '' });
 
-  // EHR Auto-Suggest Templates
-  const [complaintsSuggestions, setComplaintsSuggestions] = useState<string[]>(["Fever", "Flu & Running Nose", "Dry Cough", "Body Ache", "High Blood Pressure", "Chest Tightness", "Diarrhea", "Stomach Pain"]);
-  const [diagnosisSuggestions, setDiagnosisSuggestions] = useState<string[]>(["Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Gastroenteritis", "Essential Hypertension", "Bronchitis", "Enteric Fever"]);
+  // علامات، تشخیص اور ادویات کے خودکار سمارٹ ٹیمپلیٹس
+  const [complaintsSuggestions] = useState<string[]>(["Fever", "Flu & Running Nose", "Dry Cough", "Body Ache", "High Blood Pressure", "Chest Tightness", "Diarrhea", "Stomach Pain"]);
+  const [diagnosisSuggestions] = useState<string[]>(["Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Gastroenteritis", "Essential Hypertension", "Bronchitis", "Enteric Fever"]);
   const [medicineTemplates, setMedicineTemplates] = useState<string[]>([
     "Tab Paracetamol 500mg -- 1+1+1 (5 Days)",
     "Syp Hydryll -- 2 tsp thrice daily (5 Days)",
@@ -177,17 +169,12 @@ export default function App() {
   ]);
   const [customTemplateInput, setCustomTemplateInput] = useState('');
 
-  // Pharmacy & Stocks form binding
+  // اسٹاک، لیب اور بلنگ فارم بائنڈنگز
   const [medForm, setMedForm] = useState({ name: '', wholesalePrice: '', retailPrice: '', stock: '', minStockAlert: '20' });
-
-  // Labs form state
   const [labForm, setLabForm] = useState({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: '' });
-  
-  // Safe state mapping for search inputs
   const [labSearchQuery, setLabSearchQuery] = useState('');
   const [showLabSearchResults, setShowLabSearchResults] = useState(false);
 
-  // Billing inputs
   const [billingSearchQuery, setBillingSearchQuery] = useState('');
   const [showBillingSearchResults, setShowBillingSearchResults] = useState(false);
   const [billingPatient, setBillingPatient] = useState<Patient | null>(null);
@@ -197,7 +184,6 @@ export default function App() {
   const [selectedLabTest, setSelectedLabTest] = useState<string>('Routine Urine Analysis');
   const [customOpdFee, setCustomOpdFee] = useState<number>(0);
 
-  // Operational Expenses form
   const [expenseForm, setExpenseForm] = useState({ title: '', amount: '', category: 'Tea & Refreshments', date: '' });
 
   useEffect(() => {
@@ -215,16 +201,16 @@ export default function App() {
     loadLocalStoreFallbacks();
     testCloudSyncEngine();
 
-    // 🟢 Register PWA Service Worker
+    // رجسٹر کرنا سروس ورکر جو آف لائن چلانے میں مدد کرے گا
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js')
-          .then((reg) => console.log('🟢 PWA Service Worker Registered Successfully on Scope:', reg.scope))
-          .catch((err) => console.warn('🔴 PWA Service Worker Registration Failed:', err));
+          .then((reg) => console.log('🟢 PWA Service Worker bound successfully! Scope:', reg.scope))
+          .catch((err) => console.warn('🔴 PWA Service Worker binding failed:', err));
       });
     }
 
-    // 🟢 Capture PWA BeforeInstallPrompt Event
+    // براؤزر کا انسٹالیشن پرامپٹ پکڑنا
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -238,13 +224,11 @@ export default function App() {
     };
   }, []);
 
-  // Helper trigger
   const triggerNotification = (msg: string) => {
     setAlertMessage(msg);
     setTimeout(() => setAlertMessage(null), 4000);
   };
 
-  // Local storage mapping
   const loadLocalStoreFallbacks = () => {
     const rawPatients = localStorage.getItem("sc_patients");
     const rawVisits = localStorage.getItem("sc_visits");
@@ -267,24 +251,22 @@ export default function App() {
     if (rawCustomSugg) setMedicineTemplates(JSON.parse(rawCustomSugg));
   };
 
-  // Connection testing diagnostics
   const testCloudSyncEngine = async () => {
     if (!supabase) {
       setSyncStatus('local');
       return;
     }
     try {
-      const { data, error } = await supabase.from('patients').select('id').limit(1);
+      const { error } = await supabase.from('patients').select('id').limit(1);
       if (error) throw error;
       setSyncStatus('live');
       syncCloudDataToLocal();
     } catch (err) {
-      console.warn("Cloud connection diagnostics failed. Running locally.", err);
+      console.warn("Cloud synchronization failed. Running offline core.", err);
       setSyncStatus('local');
     }
   };
 
-  // Background Cloud Sync Pull
   const syncCloudDataToLocal = async () => {
     if (!supabase) return;
     try {
@@ -323,11 +305,10 @@ export default function App() {
       if (bl) { setBillingRecords(bl); localStorage.setItem("sc_bills", JSON.stringify(bl)); }
       if (ex) { setExpensesLedger(ex); localStorage.setItem("sc_expenses", JSON.stringify(ex)); }
     } catch (err) {
-      console.error("Failed to fetch tables from Supabase Cloud", err);
+      console.error("Cloud pull operation failed", err);
     }
   };
 
-  // Real-time PostgreSQL subscription channels
   useEffect(() => {
     if (!supabase || syncStatus !== 'live') return;
 
@@ -364,7 +345,6 @@ export default function App() {
     localStorage.setItem("sc_custom_templates", JSON.stringify(medicineTemplates));
   }, [medicineTemplates, mounted]);
 
-  // Auth processing
   const handleSecurityPinLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setPinError('');
@@ -394,13 +374,12 @@ export default function App() {
     setPinInput('');
   };
 
-  // PWA Prompt trigger click
   const handleInstallAppClick = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
-      triggerNotification("🎉 Smart Clinic ERP successfully installed on your desktop!");
+      triggerNotification("🎉 Smart Clinic ERP successfully installed on your device!");
     }
     setDeferredPrompt(null);
     setShowInstallBtn(false);
@@ -1103,7 +1082,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
-      {/* Main Header */}
+      {/* Dynamic PWA Meta tags to enforce installation triggers */}
+      <link rel="manifest" href="/manifest.webmanifest" />
+      <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/192/hospital-room.png" />
+      <meta name="theme-color" content="#0f172a" />
+
+      {/* Main Header with PWA prompt trigger controls */}
       <header className="bg-slate-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -1115,7 +1099,6 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* 📥 PWA App Installation Button */}
             {showInstallBtn && (
               <button 
                 onClick={handleInstallAppClick}
@@ -1161,7 +1144,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Tabs Switcher Panel */}
+      {/* Tabs Navigation panel switchers */}
       <nav className="bg-white border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 flex overflow-x-auto gap-1">
           {userRole === 'Doctor' && (
@@ -1193,7 +1176,7 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Global Toast Alerts */}
+      {/* Global Notification system banners */}
       {alertMessage && (
         <div className="fixed bottom-4 right-4 z-50 bg-slate-900 border border-slate-700 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce">
           <span className="text-lg">🔔</span>
@@ -1201,7 +1184,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Viewport Container */}
+      {/* Main Container Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
         
         {/* TAB: DASHBOARD */}
@@ -1513,7 +1496,7 @@ export default function App() {
                                 <span className="bg-slate-100 text-slate-700 font-black px-2 py-0.5 rounded text-[10px]">
                                   📅 {visit.date}
                                 </span>
-                                <button onClick={() => handleCloneVisitRx(visit)} className="text-[10px] font-extrabold text-blue-600 hover:text-blue-800 flex items-center gap-0.5">
+                                <button onClick={() => handleCloneVisitRx(visit)} className="text-[10px] font-extrabold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 font-bold">
                                   📋 Re-copy Rx
                                 </button>
                               </div>
@@ -1715,7 +1698,7 @@ export default function App() {
                   {showLabSearchResults && filteredLabPatients.length > 0 && (
                     <div className="mt-2 bg-white border border-slate-200 rounded-lg max-h-32 overflow-y-auto">
                       {filteredLabPatients.map(p => (
-                        <div key={p.pid} onClick={() => handleSelectLabPatient(p)} className="p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer font-bold text-blue-600">
+                        <div key={p.pid} onClick={() => handleSelectLabPatient(p)} className="p-2 border-b border-slate-100 hover:bg-slate-50/50 cursor-pointer font-bold text-blue-600">
                           {p.name} ({p.pid})
                         </div>
                       ))}

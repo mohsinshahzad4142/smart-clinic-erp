@@ -1,11 +1,8 @@
-// Smart Clinic ERP - Offline Service Worker (Failsafe Caching)
-const CACHE_NAME = 'smart-clinic-cache-v2';
+const CACHE_NAME = 'smart-clinic-cache-v11';
 const OFFLINE_URLS = [
-  '/',
-  '/manifest.webmanifest' // Fixed Next.js dynamic build manifest path
+  '/' // Only cache the root shell to guarantee 100% cloud installation success and avoid 404 crashes
 ];
 
-// Install Event - Pre-cache the main app shell and webmanifest
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -14,7 +11,6 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate Event (Cleanup older deprecated caches)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -29,7 +25,6 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Fallback to Cache
 self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
