@@ -1,14 +1,22 @@
-const CACHE_NAME = 'smart-clinic-cache-v15';
-const OFFLINE_URLS = ['/'];
+const CACHE_NAME = 'smart-clinic-v1';
+const ASSETS_TO_CACHE = [
+  '/',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png'
+];
 
+// Install Event - caching core assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(OFFLINE_URLS);
-    }).then(() => self.skipWaiting())
+      return cache.addAll(ASSETS_TO_CACHE);
+    })
   );
+  self.skipWaiting();
 });
 
+// Activate Event - cleanup old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -19,51 +27,29 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
-    }).then(() => self.clientsClaim())
+    })
+  );
+  self.clients.claim();
+});
+
+// Fetch Event - serve from cache or network fallback
+self.addEventListener('fetch', (event) => {
+  // Skip cross-origin or Supabase API requests from static caching
+  if (!event.request.url.startsWith(self.location.origin)) return;
+
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      return fetch(event.request).then((networkResponse) => {
+        return networkResponse;
+      }).catch(() => {
+        // Fallback for offline root page if needed
+        if (event.request.mode === 'navigate') {
+          return caches.match('/');
+        }
+      });
+    })
   );
 });
-
-self.addEventListener('fetch', (event) => {
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).catch(() => {
-        return caches.match('/');
-      })
-    );
-  } else {
-    event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) return cachedResponse;
-        return fetch(event.request);
-      })
-    );
-  }
-});
-```
-eof
-
-```json:PWA Manifest:smart-clinic-erp/public/manifest.json
-{
-  "name": "Smart Clinic & Diagnostics",
-  "short_name": "Smart Clinic",
-  "description": "Premium Multi-tenant Clinic ERP Suite & Diagnostics System",
-  "start_url": "/",
-  "display": "standalone",
-  "orientation": "any",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
-  "icons": [
-    {
-      "src": "https://img.icons8.com/fluency/192/hospital-room.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "https://img.icons8.com/fluency/512/hospital-room.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    }
-  ]
-}
