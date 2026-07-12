@@ -1,7 +1,5 @@
-const CACHE_NAME = 'smart-clinic-cache-v11';
-const OFFLINE_URLS = [
-  '/' // Only cache the root shell to guarantee 100% cloud installation success and avoid 404 crashes
-];
+const CACHE_NAME = 'smart-clinic-cache-v15';
+const OFFLINE_URLS = ['/'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -41,3 +39,31 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+```
+eof
+
+```json:PWA Manifest:smart-clinic-erp/public/manifest.json
+{
+  "name": "Smart Clinic & Diagnostics",
+  "short_name": "Smart Clinic",
+  "description": "Premium Multi-tenant Clinic ERP Suite & Diagnostics System",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/fluency/192/hospital-room.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://img.icons8.com/fluency/512/hospital-room.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// پریمیم کلینک برانڈنگ کنفیگریشن جو ہر جگہ استعمال ہوگی
+// Premium Clinic Configuration
 const clinicConfig = {
   clinicName: "Smart Clinic & Diagnostics",
   tagline: "Your Health, Our Top Priority",
@@ -20,7 +20,7 @@ const clinicConfig = {
   }
 };
 
-// سپابیس کنکشن سیٹنگز کلاؤڈ لائیو سنک کے لیے
+// Supabase cloud connection configurations
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -128,11 +128,11 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
-  // پی ڈبلیو اے ایپ انسٹال کرنے کے ڈائنامک اشارے
+  // PWA triggers & handlers
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
 
-  // لائیو ڈیٹا بیس کنکشن انڈیکیٹر
+  // Cloud & Sync Engine states
   const [syncStatus, setSyncStatus] = useState<'live' | 'local'>('local');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'opd' | 'pharmacy' | 'lab' | 'billing' | 'expenses'>('dashboard');
 
@@ -147,6 +147,7 @@ export default function App() {
 
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
+  // Form Binding States
   const [patientForm, setPatientForm] = useState({ name: '', age: '', gender: 'Male', phone: '' });
   const [vitalsForm, setVitalsForm] = useState({ bp: '', temp: '', weight: '' });
   
@@ -157,7 +158,7 @@ export default function App() {
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
   const [prescriptionForm, setPrescriptionForm] = useState({ complaints: '', diagnosis: '', medicines: '' });
 
-  // علامات، تشخیص اور ادویات کے خودکار سمارٹ ٹیمپلیٹس
+  // Clinical suggestions for rapid prescription compilation
   const [complaintsSuggestions] = useState<string[]>(["Fever", "Flu & Running Nose", "Dry Cough", "Body Ache", "High Blood Pressure", "Chest Tightness", "Diarrhea", "Stomach Pain"]);
   const [diagnosisSuggestions] = useState<string[]>(["Acute Viral Infection", "Upper Respiratory Tract Infection (URTI)", "Gastroenteritis", "Essential Hypertension", "Bronchitis", "Enteric Fever"]);
   const [medicineTemplates, setMedicineTemplates] = useState<string[]>([
@@ -169,7 +170,6 @@ export default function App() {
   ]);
   const [customTemplateInput, setCustomTemplateInput] = useState('');
 
-  // اسٹاک، لیب اور بلنگ فارم بائنڈنگز
   const [medForm, setMedForm] = useState({ name: '', wholesalePrice: '', retailPrice: '', stock: '', minStockAlert: '20' });
   const [labForm, setLabForm] = useState({ patientName: '', pid: '', testName: 'CBC (Complete Blood Count)', resultValue: '', date: '' });
   const [labSearchQuery, setLabSearchQuery] = useState('');
@@ -201,16 +201,22 @@ export default function App() {
     loadLocalStoreFallbacks();
     testCloudSyncEngine();
 
-    // رجسٹر کرنا سروس ورکر جو آف لائن چلانے میں مدد کرے گا
+    // Bind PWA Service Worker
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
+      const registerSW = () => {
         navigator.serviceWorker.register('/sw.js')
           .then((reg) => console.log('🟢 PWA Service Worker bound successfully! Scope:', reg.scope))
           .catch((err) => console.warn('🔴 PWA Service Worker binding failed:', err));
-      });
+      };
+
+      if (document.readyState === 'complete') {
+        registerSW();
+      } else {
+        window.addEventListener('load', registerSW);
+      }
     }
 
-    // براؤزر کا انسٹالیشن پرامپٹ پکڑنا
+    // PWA Install prompt listener
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -1082,12 +1088,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
-      {/* Dynamic PWA Meta tags to enforce installation triggers */}
-      <link rel="manifest" href="/manifest.webmanifest" />
-      <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/192/hospital-room.png" />
-      <meta name="theme-color" content="#0f172a" />
-
-      {/* Main Header with PWA prompt trigger controls */}
       <header className="bg-slate-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -1124,7 +1124,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Persistent Beautiful Clinic & Doctor Branding Banner */}
       <div className="bg-white border-b border-slate-200 py-3.5 px-4 md:px-6 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
@@ -1144,7 +1143,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Tabs Navigation panel switchers */}
       <nav className="bg-white border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 flex overflow-x-auto gap-1">
           {userRole === 'Doctor' && (
@@ -1176,7 +1174,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Global Notification system banners */}
       {alertMessage && (
         <div className="fixed bottom-4 right-4 z-50 bg-slate-900 border border-slate-700 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce">
           <span className="text-lg">🔔</span>
@@ -1184,10 +1181,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Container Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
         
-        {/* TAB: DASHBOARD */}
         {activeTab === 'dashboard' && userRole === 'Doctor' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1280,7 +1275,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB: OPD QUEUE */}
         {activeTab === 'opd' && (
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 rounded-2xl shadow-md text-white relative">
@@ -1444,7 +1438,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* EHR Doctor Consultation Desk layout */}
             {selectedToken && userRole === 'Doctor' && (
               <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md overflow-hidden transition-all mt-6">
                 <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
@@ -1587,7 +1580,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB: PHARMACY STOCK */}
         {activeTab === 'pharmacy' && userRole === 'Doctor' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
@@ -1677,7 +1669,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB: DIAGNOSTICS LAB */}
         {activeTab === 'lab' && userRole === 'Doctor' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1779,7 +1770,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB: POS CHECKOUT & BILLING */}
         {activeTab === 'billing' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1947,7 +1937,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB: EXPENSES LEDGER */}
         {activeTab === 'expenses' && userRole === 'Doctor' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
@@ -2036,7 +2025,6 @@ export default function App() {
 
       </main>
 
-      {/* Footer Copyright */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
         <p>© {new Date().getFullYear()} {clinicConfig.clinicName} ERP Systems. Built with precision &amp; live PWA desktop app installation.</p>
       </footer>
