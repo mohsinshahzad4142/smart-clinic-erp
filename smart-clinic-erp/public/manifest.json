@@ -1,16 +1,12 @@
 {
   "name": "Smart Clinic & Diagnostics",
   "short_name": "Smart Clinic",
+  "description": "Your Health, Our Top Priority",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1e3a8a",
   "icons": [
-    {
-      "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
-    },
     {
       "src": "/icon-192.png",
       "type": "image/png",
